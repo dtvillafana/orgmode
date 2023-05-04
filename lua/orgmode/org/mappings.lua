@@ -507,10 +507,17 @@ function OrgMappings:org_return()
 
   local old_mapping = config.old_cr_mapping
 
+  -- No other mapping for <CR>, just reproduce it.
   if not old_mapping or vim.tbl_isempty(old_mapping) then
     return vim.api.nvim_feedkeys(utils.esc('<CR>'), 'n', true)
   end
 
+  -- Lua mapping that installed a Lua function to call.
+  if old_mapping.callback then
+    return old_mapping.callback()
+  end
+
+  -- Classic, string-based mapping. Reconstruct it as faithfully as possible.
   local rhs = utils.esc(old_mapping.rhs)
 
   if old_mapping.expr > 0 then
@@ -776,10 +783,13 @@ function OrgMappings:open_at_point()
     return vim.cmd(string.format('edit %s', url))
   end
 
+  local headlines = Hyperlinks.find_matching_links(link_ctx)
   local current_headline = Files.get_closest_headline()
-  local headlines = vim.tbl_filter(function(headline)
-    return headline.line ~= current_headline.line and headline.id ~= current_headline.id
-  end, Hyperlinks.find_matching_links(link_ctx))
+  if current_headline then
+    headlines = vim.tbl_filter(function(headline)
+      return headline.line ~= current_headline.line and headline.id ~= current_headline.id
+    end, headlines)
+  end
   if #headlines == 0 then
     return
   end
