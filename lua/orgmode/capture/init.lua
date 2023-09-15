@@ -135,7 +135,9 @@ end
 ---@private
 function Capture:_get_refile_vars()
   local template = vim.api.nvim_buf_get_var(0, 'org_template') or {}
-  local file = vim.fn.resolve(vim.fn.fnamemodify(template.target or config.org_default_notes_file, ':p'))
+  local target = self.templates:compile_target(template.target or config.org_default_notes_file)
+  local file = vim.fn.resolve(vim.fn.fnamemodify(target, ':p'))
+
   if vim.fn.filereadable(file) == 0 then
     local choice = vim.fn.confirm(('Refile destination %s does not exist. Create now?'):format(file), '&Yes\n&No')
     if choice ~= 1 then
@@ -284,7 +286,8 @@ function Capture:_refile_to(file, lines, item, destination_line)
     vim.api.nvim_open_win(bufnr, true, {
       relative = 'editor',
       width = 1,
-      height = 1,
+      -- TODO: Revert to 1 once the https://github.com/neovim/neovim/issues/19464 is fixed
+      height = 2,
       row = 99999,
       col = 99999,
       zindex = 1,

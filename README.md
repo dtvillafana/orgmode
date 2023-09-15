@@ -1,7 +1,7 @@
 
 
 <div align="center">
-  <img alt="[org-neovim-blend" src="https://user-images.githubusercontent.com/1782860/124820564-eddc5000-df6d-11eb-9016-d0c073a9575c.png" width="250" />
+  <img alt="A blend of the Neovim (shape) and Org-mode (colours) logos" src="assets/nvim-orgmode.svg" width="250px" />
 
 # nvim-orgmode
 
@@ -26,19 +26,43 @@
 
 Use your favourite package manager:
 
-<details>
-  <summary><a href="https://github.com/kristijanhusak/vim-packager"><b>vim-packager</b></a></summary>
+<details open>
+  <summary><b><a href="https://github.com/folke/lazy.nvim">lazy.nvim</a> (recommended)</b></summary>
   </br>
 
 ```lua
-packager.add('nvim-treesitter/nvim-treesitter')
-packager.add('nvim-orgmode/orgmode')
+{
+  'nvim-orgmode/orgmode',
+  dependencies = {
+    { 'nvim-treesitter/nvim-treesitter', lazy = true },
+  },
+  event = 'VeryLazy',
+  config = function()
+    -- Load treesitter grammar for org
+    require('orgmode').setup_ts_grammar()
+
+    -- Setup treesitter
+    require('nvim-treesitter.configs').setup({
+      highlight = {
+        enable = true,
+        additional_vim_regex_highlighting = { 'org' },
+      },
+      ensure_installed = { 'org' },
+    })
+
+    -- Setup orgmode
+    require('orgmode').setup({
+      org_agenda_files = '~/orgfiles/**/*',
+      org_default_notes_file = '~/orgfiles/refile.org',
+    })
+  end,
+}
 ```
 
 </details>
 
 <details open>
-  <summary><b><a href="https://github.com/wbthomason/packer.nvim">packer.nvim</a> (recommended)</b></summary>
+  <summary><b><a href="https://github.com/wbthomason/packer.nvim">packer.nvim</a></b></summary>
   </br>
 
 ```lua
@@ -72,27 +96,10 @@ call dein#add('nvim-orgmode/orgmode')
 ```
 
 </details>
-
-<details>
-  <summary><b>Lazy loading (not recommended)</b></summary>
-  </br>
-
-Lazy loading via `ft` option works, but not completely. Global mappings are not set because plugin is not initialized on startup.
-Above setup has a startup time of somewhere between 1 and 3 ms, so there are not many benefits in lazy loading.
-If you want to do it anyway, here's the lazy load setup:
-```lua
-use {'nvim-treesitter/nvim-treesitter'}
-use {'nvim-orgmode/orgmode',
-    ft = {'org'},
-    config = function()
-            require('orgmode').setup{}
-    end
-    }
-```
-
-</details>
-
 ### Setup
+
+Note that this setup is not needed for [lazy.nvim](https://github.com/folke/lazy.nvim)
+since instructions above covers full setup
 
 ```lua
 -- init.lua
