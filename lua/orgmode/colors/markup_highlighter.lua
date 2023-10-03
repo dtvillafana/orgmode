@@ -1,4 +1,3 @@
-local ts = require('orgmode.treesitter.compat')
 local config = require('orgmode.config')
 local ts_utils = require('nvim-treesitter.ts_utils')
 local query = nil
@@ -111,22 +110,10 @@ local get_tree = ts_utils.memoize_by_buf_tick(function(bufnr)
   return tree[1]:root()
 end)
 
-local function get_predicate_nodes(match, n)
-  local total = n or 2
-  local counter = 1
-  local nodes = {}
-  for _, node in pairs(match) do
-    nodes[counter] = node
-    counter = counter + 1
-    if counter > total then
-      break
-    end
-  end
-  return unpack(nodes)
-end
+local function is_valid_markup_range(match, _, source, predicates)
+  local start_node = match[predicates[2]]
+  local end_node = match[predicates[3]]
 
-local function is_valid_markup_range(match, _, source, _)
-  local start_node, end_node = get_predicate_nodes(match)
   if not start_node or not end_node then
     return
   end
@@ -151,8 +138,10 @@ local function is_valid_markup_range(match, _, source, _)
     and end_text:sub(1, 1) ~= ' '
 end
 
-local function is_valid_hyperlink_range(match, _, source, _)
-  local start_node, end_node = get_predicate_nodes(match)
+local function is_valid_hyperlink_range(match, _, source, predicates)
+  local start_node = match[predicates[2]]
+  local end_node = match[predicates[3]]
+
   if not start_node or not end_node then
     return
   end
@@ -172,8 +161,10 @@ local function is_valid_hyperlink_range(match, _, source, _)
   return is_valid_start and is_valid_end
 end
 
-local function is_valid_latex_range(match, _, source, _)
-  local start_node_left, start_node_right, end_node = get_predicate_nodes(match, 3)
+local function is_valid_latex_range(match, _, source, predicates)
+  local start_node_left = match[predicates[2]]
+  local start_node_right = match[predicates[3]]
+  local end_node = match[predicates[4]]
   if not start_node_right or not end_node then
     return
   end
@@ -216,7 +207,7 @@ local function load_deps()
   if query then
     return
   end
-  query = ts.get_query('org', 'markup')
+  query = vim.treesitter.query.get('org', 'markup')
   vim.treesitter.query.add_predicate('org-is-valid-markup-range?', is_valid_markup_range)
   vim.treesitter.query.add_predicate('org-is-valid-hyperlink-range?', is_valid_hyperlink_range)
   vim.treesitter.query.add_predicate('org-is-valid-latex-range?', is_valid_latex_range)

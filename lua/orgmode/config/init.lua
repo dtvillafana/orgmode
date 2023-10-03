@@ -292,6 +292,21 @@ function Config:setup_mappings(category, buffer)
   end
 end
 
+--- Setup the foldlevel for a given org file
+function Config:setup_foldlevel()
+  if self.org_startup_folded == 'overview' then
+    vim.opt_local.foldlevel = 0
+  elseif self.org_startup_folded == 'content' then
+    vim.opt_local.foldlevel = 1
+  elseif self.org_startup_folded == 'showeverything' then
+    vim.opt_local.foldlevel = 99
+  elseif self.org_startup_folded ~= 'inherit' then
+    utils.echo_warning("Invalid option passed for 'org_startup_folded'!")
+    self.opts.org_startup_folded = 'overview'
+    self:setup_foldlevel()
+  end
+end
+
 ---@return string|nil
 function Config:parse_archive_location(file, archive_loc)
   if self:is_archive_file(file) then
@@ -326,6 +341,20 @@ function Config:get_inheritable_tags(headline)
   return vim.tbl_filter(function(tag)
     return not vim.tbl_contains(self.opts.org_tags_exclude_from_inheritance, tag)
   end, headline.tags)
+end
+
+function Config:setup_ts_predicates()
+  local todo_keywords = self:get_todo_keywords().KEYS
+
+  vim.treesitter.query.add_predicate('org-is-todo-keyword?', function(match, _, source, predicate)
+    local node = match[predicate[2]]
+    if node then
+      local text = vim.treesitter.get_node_text(node, source)
+      return todo_keywords[text] and todo_keywords[text].type == predicate[3] or false
+    end
+
+    return false
+  end, true)
 end
 
 function Config:ts_highlights_enabled()
