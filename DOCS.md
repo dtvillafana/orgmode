@@ -265,12 +265,31 @@ Possible values:
   * between `\[` and `\]` delimiters - example: `\[ a=-\sqrt{2} \]`
   * between `\(` and `\)` delimiters - example: `\( b=2 \)`
 
-#### **org_indent_mode**
-*type*: `string`<br />
-*default value*: `indent`<br />
+#### **org_startup_indented**
+
+*type*: `boolean`<br />
+*default value*: `false`<br />
 Possible values:
-* `indent` - Use default indentation that follows headlines/checkboxes/previous line indent
-* `noindent` - Disable indentation. All lines start from 1st column
+* `true` - Uses *Virtual* indents to align content visually. The indents are only visual, they are not saved to the file.
+* `false` - Do not add any *Virtual* indentation.
+
+This feature has no effect when enabled on Neovim versions < 0.10.0
+
+#### **org_adapt_indentation**
+
+*type*: `boolean`<br />
+*default value*: `true`<br />
+Possible values:
+* `true` - Use *hard* indents for content under headlines. Files will save with indents relative to headlines.
+* `false` - Do not add any *hard* indents. Files will save without indentation relative to headlines.
+
+#### **org_indent_mode_turns_off_org_adapt_indentation**
+
+*type*: `boolean`<br />
+*default value*: `true`<br />
+Possible values:
+* `true` - Disable [`org_adapt_indentation`](#org_adapt_indentation) by default when [`org_startup_indented`](#org_startup_indented) is enabled.
+* `false` - Do not disable [`org_adapt_indentation`](#org_adapt_indentation) by default when [`org_startup_indented`](#org_startup_indented) is enabled.
 
 #### **org_src_window_setup**
 *type*: `string|function`<br />
@@ -344,6 +363,34 @@ Determine if blank line should be prepended when:
 * Adding heading via `org_meta_return` and `org_insert_*` mappings
 * Adding a list item via `org_meta_return`
 
+#### **org_id_uuid_program**
+*type*: `string`<br />
+*default value*: `uuidgen`<br />
+External program used to generate uuid's for id module
+
+#### **org_id_ts_format**
+*type*: `string`<br />
+*default value*: `%Y%m%d%H%M%S`<br />
+Format of the id generated when [org_id_method](#org_id_method) is set to `ts`.
+
+#### **org_id_method**
+*type*: `'uuid' | 'ts' | 'org'`<br />
+*default value*: `uuid`<br />
+What method to use to generate ids via org id module.
+* `uuid` - Use [org_id_uuid_program](#org_id_uuid_program) to generate the id
+* `ts` - Generate id from current timestamp using format [org_id_ts_format](#org_id_ts_format)
+* `org` - Generate a random 12 digit number and prepend [org_id_prefix](#org_id_prefix)
+
+#### **org_id_prefix**
+*type*: `string | nil`<br />
+*default value*: `nil`<br />
+Prefix added to the generated id when [org_id_method](#org_id_method) is set to `org`.
+
+#### **org_id_link_to_org_use_id**
+*type*: `boolean`<br />
+*default value*: `false`<br />
+If `true`, generate ID with the Org ID module and append it to the headline as property. More info on [org_store_link](#org_store_link)
+
 #### **calendar_week_start_day**
 *type*: `number`<br />
 *default value*: `1`<br />
@@ -412,6 +459,16 @@ Variables:
   * `%^{PROMPT|DEFAULT|COMPLETION...}`: Prompt for input, if completion is provided an :h inputlist will be used
   * `%(EXP)`: Runs the given lua code and inserts the result. NOTE: this will internally pass the content to the lua `load()` function. So the body inside `%()` should be the body of a function that returns a string.
 
+Templates have the following fields:
+  * `description` (`string`) — description of the template that is displayed in the template selection menu
+  * `template` (`string|string[]`) — body of the template that will be used when creating capture
+  * `target` (`string?`) — name of the file to which the capture content will be added. If the target is not specified, the content will be added to the [`org_default_notes_file`](#orgdefaultnotesfile) file
+  * `headline` (`string?`) — title of the headline after which the capture content will be added. If no headline is specified, the content will be appended to the end of the file
+  * `properties` (`table?`):
+    * `empty_lines` (`table|number?`) — if the value is a number, then empty lines are added before and after the content. If the value is a table, then the following fields are expected:
+      * `before` (`integer?`) — add empty lines to the beginning of the content
+      * `after` (`integer?`) — add empty lines to the end of the content
+
 Example:<br />
   ```lua
   { T = {
@@ -423,20 +480,24 @@ Example:<br />
 
 Journal example:<br />
   ```lua
-  { j = {
-    description = 'Journal',
-    template = '\n*** %<%Y-%m-%d> %<%A>\n**** %U\n\n%?',
-    target = '~/sync/org/journal.org'
-  } }
+  {
+    j = {
+      description = 'Journal',
+      template = '\n*** %<%Y-%m-%d> %<%A>\n**** %U\n\n%?',
+      target = '~/sync/org/journal.org'
+    },
+  }
   ```
 
 Journal example with dynamic target, i.e. a separate file per month:<br />
   ```lua
-  { J = {
-    description = 'Journal',
-    template = '\n*** %<%Y-%m-%d> %<%A>\n**** %U\n\n%?',
-    target = '~/sync/org/journal/%<%Y-%m>.org'
-  } }
+  {
+    J = {
+      description = 'Journal',
+      template = '\n*** %<%Y-%m-%d> %<%A>\n**** %U\n\n%?',
+      target = '~/sync/org/journal/%<%Y-%m>.org'
+    },
+  }
   ```
 
 Nested key example:<br />
@@ -456,16 +517,38 @@ Nested key example:<br />
       headline = 'one-time'
     }
   }
+  -- or
+  {
+    e = {
+      description = 'Event',
+      subtemplates = {
+        r = {
+          description = 'recurring',
+          template = '** %?\n %T',
+          target = '~/org/calendar.org',
+          headline = 'recurring'
+        },
+        o = {
+          description = 'one-time',
+          template = '** %?\n %T',
+          target = '~/org/calendar.org',
+          headline = 'one-time'
+        },
+      },
+    },
+  }
   ```
 
 Lua expression example:<br />
   ```lua
-  { j = {
-    description = 'Journal',
-    template = '* %(return vim.fn.getreg "w")',
-    -- get the content of register "w"
-    target = '~/sync/org/journal.org'
-  } }
+  {
+    j = {
+      description = 'Journal',
+      template = '* %(return vim.fn.getreg "w")',
+      -- get the content of register "w"
+      target = '~/sync/org/journal.org'
+    },
+  }
   ```
 
 #### **org_agenda_min_height**
@@ -564,6 +647,26 @@ require('orgmode').setup({
   }
 })
 ```
+
+To disable a specific mapping, set it's value to `false`:
+
+```lua
+require('orgmode').setup({
+  org_agenda_files = {'~/Dropbox/org/*', '~/my-orgs/**/*'},
+  org_default_notes_file = '~/Dropbox/org/refile.org',
+  mappings = {
+    global = {
+      org_agenda = false,
+      org_capture = 'gC'
+    },
+    agenda = {
+      org_agenda_later = false
+    }
+  }
+})
+```
+
+You can find the configuration file that holds all default mappings [here](./lua/orgmode/config/mappings/init.lua)
 
 **NOTE**: All mappings are normal mode mappings (`nnoremap`)
 
@@ -840,8 +943,15 @@ Toggle current line checkbox state
 *mapped to*: `<Leader>o*`<br />
 Toggle current line to headline and vice versa. Checkboxes will turn into TODO headlines.
 #### **org_insert_link**
-*mapped to*: `<Leader>oil`<br />
+*mapped to*: `<Leader>oli`<br />
 Insert a hyperlink at cursor position. When the cursor is on a hyperlink, edit that hyperlink.<br />
+If there are any links stored with [org_store_link](#org_store_link), pressing `<TAB>` to autocomplete the input
+will show list of all stored links to select. Links generated with ID are properly expanded to valid links after selection.
+#### **org_store_link**
+*mapped to*: `<Leader>ols`<br />
+Generate a link to the closest headline. If [org_id_link_to_org_use_id](#org_id_link_to_org_use_id) is `true`,
+it appends the `ID` property to the headline, and generates link with that id to be inserted via [org_insert_link](#org_insert_link).
+When [org_id_link_to_org_use_id](#org_id_link_to_org_use_id) is `false`, it generates the standard file::*headline link (example: `file:/path/to/my/todos.org::*My headline`)
 #### **org_open_at_point**
 *mapped to*: `<Leader>oo`<br />
 Open hyperlink or date under cursor. When date is under the cursor, open the agenda for that day.<br />
@@ -1493,6 +1603,11 @@ set statusline=%{v:lua.orgmode.statusline()}
 
 ## Changelog
 To track breaking changes, subscribe to [Notice of breaking changes](https://github.com/nvim-orgmode/orgmode/issues/217) issue where those are announced.
+
+#### 21 January 2024
+
+* Option `org_indent_mode` was deprecated in favor of [org_startup_indented](#org_startup_indented). To remove the
+  warning use `org_startup_indented`. This was introduced to support Virtual Indent more in line with Emacs.
 
 #### 24 October 2021
 * Help mapping was changed from `?` to `g?` to avoid conflict with built in backward search. See issue [#106](https://github.com/nvim-orgmode/orgmode/issues/106).

@@ -6,7 +6,8 @@ local debounce_timers = {}
 local query_cache = {}
 local tmp_window_augroup = vim.api.nvim_create_augroup('OrgTmpWindow', { clear = true })
 
-function utils.readfile(file)
+function utils.readfile(file, opts)
+  opts = opts or {}
   return Promise.new(function(resolve, reject)
     uv.fs_open(file, 'r', 438, function(err1, fd)
       if err1 then
@@ -24,9 +25,38 @@ function utils.readfile(file)
             if err4 then
               return reject(err4)
             end
+            if opts.raw then
+              return resolve(data)
+            end
             local lines = vim.split(data, '\n')
             table.remove(lines, #lines)
             return resolve(lines)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
+
+function utils.writefile(file, data)
+  return Promise.new(function(resolve, reject)
+    uv.fs_open(file, 'w', 438, function(err1, fd)
+      if err1 then
+        return reject(err1)
+      end
+      uv.fs_fstat(fd, function(err2, stat)
+        if err2 then
+          return reject(err2)
+        end
+        uv.fs_write(fd, data, nil, function(err3, bytes)
+          if err3 then
+            return reject(err3)
+          end
+          uv.fs_close(fd, function(err4)
+            if err4 then
+              return reject(err4)
+            end
+            return resolve(bytes)
           end)
         end)
       end)
@@ -227,7 +257,7 @@ function utils.humanize_minutes(minutes)
 end
 
 ---@param query string
----@param node userdata
+---@param node TSNode
 ---@param file_content string[]
 ---@param file_content_str string
 ---@return table[]
@@ -254,7 +284,7 @@ function utils.get_ts_matches(query, node, file_content, file_content_str)
   return matches
 end
 
----@param node userdata
+---@param node TSNode
 ---@param content string[]
 ---@return string[]
 function utils.get_node_text(node, content)
@@ -297,9 +327,9 @@ function utils.get_node_text(node, content)
   end
 end
 
----@param node userdata
+---@param node TSNode
 ---@param type string
----@return userdata | nil
+---@return TSNode | nil
 function utils.get_closest_parent_of_type(node, type, accept_at_cursor)
   local parent = node
 
@@ -400,7 +430,7 @@ function utils.choose(items)
 end
 
 ---@param file File
----@param parent_node userdata
+---@param parent_node TSNode
 ---@param children_names table<string, boolean>
 ---@return table
 function utils.get_named_children_nodes(file, parent_node, children_names)
@@ -594,6 +624,37 @@ function utils.pad_right(str, amount)
     return str
   end
   return string.format('%s%s', str, string.rep(' ', spaces))
+end
+
+---@param filename string
+function utils.edit_file(filename)
+  local buf_not_already_loaded = vim.fn.bufexists(filename) ~= 1
+  local cur_win = vim.api.nvim_get_current_win()
+
+  return {
+    open = function()
+      local bufnr = vim.fn.bufadd(filename)
+      vim.api.nvim_open_win(bufnr, true, {
+        relative = 'editor',
+        width = 1,
+        -- TODO: Revert to 1 once the https://github.com/neovim/neovim/issues/19464 is fixed
+        height = 2,
+        row = 99999,
+        col = 99999,
+        zindex = 1,
+        style = 'minimal',
+      })
+    end,
+    close = function()
+      vim.cmd('silent! w')
+      if buf_not_already_loaded then
+        vim.cmd('silent! bw!')
+      else
+        vim.cmd('silent! q!')
+      end
+      vim.api.nvim_set_current_win(cur_win)
+    end,
+  }
 end
 
 return utils
