@@ -1,5 +1,6 @@
----@class DefaultConfig
+---@class OrgDefaultConfig
 ---@field org_id_method 'uuid' | 'ts' | 'org'
+---@field org_agenda_span 'day' | 'week' | 'month' | 'year' | number
 local DefaultConfig = {
   org_agenda_files = '',
   org_default_notes_file = '',
@@ -38,6 +39,7 @@ local DefaultConfig = {
   org_adapt_indentation = true,
   org_startup_indented = false,
   org_indent_mode_turns_off_org_adapt_indentation = true,
+  org_indent_mode_turns_on_hiding_stars = true,
   org_time_stamp_rounding_minutes = 5,
   org_blank_before_new_entry = {
     heading = true,
@@ -50,6 +52,10 @@ local DefaultConfig = {
   org_id_method = 'uuid',
   org_id_prefix = nil,
   org_id_link_to_org_use_id = false,
+  org_babel_default_header_args = {
+    [':tangle'] = 'no',
+    [':noweb'] = 'no',
+  },
   win_split_mode = 'horizontal',
   win_border = 'single',
   notifications = {
@@ -63,6 +69,7 @@ local DefaultConfig = {
   },
   mappings = {
     disable_all = false,
+    org_return_uses_meta_return = false,
     prefix = '<Leader>o',
     global = {
       org_agenda = '<prefix>a',
@@ -160,6 +167,7 @@ local DefaultConfig = {
       org_clock_goto = '<prefix>xj',
       org_set_effort = '<prefix>xe',
       org_show_help = 'g?',
+      org_babel_tangle = '<prefix>bt',
     },
     edit_src = {
       org_edit_src_abort = '<prefix>k',

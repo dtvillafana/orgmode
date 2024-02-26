@@ -1,12 +1,12 @@
-local Templates = require('orgmode.capture.templates')
+local Template = require('orgmode.capture.template')
+local Date = require('orgmode.objects.date')
 
 describe('Capture template', function()
-  local templates = Templates:new()
   it('should compile expression', function()
     ---Backup and restore the clipboard
     local clip_backup = vim.fn.getreg('+')
     vim.fn.setreg('+', 'test')
-    local result = templates:compile({
+    local template = Template:new({
       template = '* TODO\n%<%Y-%m-%d>\n%t\n%T--%T\n%<%H:%M>\n%<%A>\n%x\n%(return string.format("hello %s", "world"))',
     })
 
@@ -19,8 +19,30 @@ describe('Capture template', function()
       os.date('%A'),
       'test',
       'hello world',
-    }, result)
+    }, template:compile())
 
     vim.fn.setreg('+', clip_backup)
+  end)
+
+  it('gets current date for datetree enabled with true', function()
+    local template = Template:new({
+      template = '* %?',
+      datetree = true,
+    })
+
+    assert.are.same(Date.today():to_string(), template:get_datetree_date():to_string())
+  end)
+
+  it('gets a proper date for datetree enabled as time prompt', function()
+    local date = Date.today():subtract({ month = 2 })
+    local template = Template:new({
+      template = '* %?',
+      datetree = {
+        time_prompt = true,
+        date = date,
+      },
+    })
+
+    assert.are.same(date:to_string(), template:get_datetree_date():to_string())
   end)
 end)

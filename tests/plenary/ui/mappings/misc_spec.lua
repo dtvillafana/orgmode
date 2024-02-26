@@ -1,7 +1,5 @@
-local helpers = require('tests.plenary.ui.helpers')
-local org = require('orgmode')
+local helpers = require('tests.plenary.helpers')
 local config = require('orgmode.config')
-local Files = require('orgmode.parser.files')
 
 describe('Mappings', function()
   after_each(function()
@@ -9,7 +7,7 @@ describe('Mappings', function()
   end)
 
   it('should toggle archive tag on headline (org_toggle_archive_tag)', function()
-    helpers.load_file_content({
+    helpers.create_file({
       '#TITLE: Test',
       '',
       '* TODO Test orgmode',
@@ -33,7 +31,7 @@ describe('Mappings', function()
       },
     })
 
-    helpers.load_file_content({
+    helpers.create_file({
       '* DONE top level todo :WORK:',
       'content for top level todo',
     })

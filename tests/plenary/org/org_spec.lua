@@ -1,21 +1,17 @@
----@diagnostic disable: need-check-nil
-local helpers = require('tests.plenary.ui.helpers')
-local ts_org = require('orgmode.treesitter')
-local tree_utils = require('orgmode.utils.treesitter')
-local mock = require('luassert.mock')
-local File = require('orgmode.parser.file')
+local helpers = require('tests.plenary.helpers')
 local Date = require('orgmode.objects.date')
+local org = require('orgmode')
 
 describe('Org file', function()
   it('should properly add new properties to a section', function()
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       'DEADLINE: <2021-05-10 11:00 +1w>',
       '* TODO Another todo',
     })
 
-    local headline = ts_org.headline_at(1)
-    assert.are.same('Test orgmode', headline:title())
+    local headline = org.files:get_closest_headline({ 1, 0 })
+    assert.are.same('Test orgmode', headline:get_title())
     headline:set_property('CATEGORY', 'testing')
 
     assert.are.same({
@@ -29,7 +25,7 @@ describe('Org file', function()
   end)
 
   it('should properly append to existing properties', function()
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       'DEADLINE: <2021-05-10 11:00 +1w>',
       '  :PROPERTIES:',
@@ -37,8 +33,8 @@ describe('Org file', function()
       '  :END:',
       '* TODO Another todo',
     })
-    local headline = ts_org.headline_at(1)
-    assert.are.same('Test orgmode', headline:title())
+    local headline = org.files:get_closest_headline({ 1, 0 })
+    assert.are.same('Test orgmode', headline:get_title())
     headline:set_property('CUSTOM_ID', '1')
 
     assert.are.same({
@@ -53,7 +49,7 @@ describe('Org file', function()
   end)
   --
   it('should properly update existing property', function()
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       'DEADLINE: <2021-05-10 11:00 +1w>',
       '  :PROPERTIES:',
@@ -62,8 +58,8 @@ describe('Org file', function()
       '  :END:',
       '* TODO Another todo',
     })
-    local headline = ts_org.headline_at(1)
-    assert.are.same('Test orgmode', headline:title())
+    local headline = org.files:get_closest_headline({ 1, 0 })
+    assert.are.same('Test orgmode', headline:get_title())
     headline:set_property('CATEGORY', 'Updated')
 
     assert.are.same({
@@ -79,13 +75,13 @@ describe('Org file', function()
 
   it('should add closed date to section if it does not exist', function()
     local now = Date.now()
-    local lines = helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       'DEADLINE: <2021-05-10 11:00>',
       '* TODO Another todo',
     })
 
-    local headline = ts_org.headline_at(1)
+    local headline = org.files:get_closest_headline({ 1, 0 })
     headline:set_closed_date()
 
     assert.are.same({
@@ -105,12 +101,12 @@ describe('Org file', function()
 
   it('should remove closed date from section if it exists', function()
     local now = Date.now()
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       'DEADLINE: <2021-05-10 11:00> CLOSED: ' .. now:to_wrapped_string(false),
       '* TODO Another todo',
     })
-    local headline = ts_org.headline_at(1)
+    local headline = org.files:get_closest_headline({ 1, 0 })
     headline:remove_closed_date()
 
     assert.are.same({
@@ -119,14 +115,14 @@ describe('Org file', function()
       '* TODO Another todo',
     }, vim.api.nvim_buf_get_lines(0, 0, 3, false))
 
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode only closed :WORK:',
       'CLOSED: ' .. now:to_wrapped_string(false),
       '* TODO Another todo',
     })
 
-    headline = ts_org.headline_at(1)
-    assert.are.same('Test orgmode only closed', headline:title())
+    local headline = org.files:get_closest_headline({ 1, 0 })
+    assert.are.same('Test orgmode only closed', headline:get_title())
     headline:remove_closed_date()
     assert.are.same({
       '* TODO Test orgmode only closed :WORK:',
@@ -136,11 +132,11 @@ describe('Org file', function()
 
   it('should add and update deadline date', function()
     local deadline_date = Date.from_string('2021-08-18 Wed')
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       '* TODO Another todo',
     })
-    local headline = ts_org.headline_at(1)
+    local headline = org.files:get_closest_headline({ 1, 0 })
     headline:set_deadline_date(deadline_date)
 
     assert.are.same({
@@ -160,11 +156,11 @@ describe('Org file', function()
 
   it('should add, update and remove scheduled date', function()
     local scheduled_date = Date.from_string('2021-08-18 Wed')
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       '* TODO Another todo',
     })
-    local headline = ts_org.headline_at(1)
+    local headline = org.files:get_closest_headline({ 1, 0 })
     headline:set_scheduled_date(scheduled_date)
 
     assert.are.same({
@@ -173,13 +169,13 @@ describe('Org file', function()
       '* TODO Another todo',
     }, vim.api.nvim_buf_get_lines(0, 0, 3, false))
 
-    helpers.load_file_content({
+    helpers.create_file({
       '* TODO Test orgmode :WORK:',
       '  DEADLINE: <2021-08-18 Wed>',
       '* TODO Another todo',
     })
 
-    headline = ts_org.headline_at(1)
+    headline = org.files:get_closest_headline({ 1, 0 })
     headline:set_scheduled_date(scheduled_date)
 
     assert.are.same({

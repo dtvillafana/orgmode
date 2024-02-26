@@ -2,10 +2,10 @@ local instance = {}
 local utils = require('orgmode.utils')
 local fs = require('orgmode.utils.fs')
 local defaults = require('orgmode.config.defaults')
----@type table<string, MapEntry>
+---@type table<string, OrgMapEntry>
 local mappings = require('orgmode.config.mappings')
 
----@class Config:DefaultConfig
+---@class OrgConfig:OrgDefaultConfig
 ---@field opts table
 ---@field todo_keywords table
 local Config = {}
@@ -15,7 +15,6 @@ function Config:new(opts)
   local data = {
     opts = vim.tbl_deep_extend('force', defaults, opts or {}),
     todo_keywords = nil,
-    ts_hl_enabled = nil,
   }
   setmetatable(data, self)
   return data
@@ -29,7 +28,7 @@ function Config:__index(key)
 end
 
 ---@param opts table
----@return Config
+---@return OrgConfig
 function Config:extend(opts)
   self.todo_keywords = nil
   opts = opts or {}
@@ -162,37 +161,6 @@ function Config:_deprecation_notify(opts)
   end
 end
 
----@return string[]
-function Config:get_all_files()
-  local all_filenames = {}
-  if self.opts.org_default_notes_file and self.opts.org_default_notes_file ~= '' then
-    local default_full_path = vim.fn.resolve(vim.fn.fnamemodify(self.opts.org_default_notes_file, ':p'))
-    if vim.loop.fs_stat(default_full_path) then
-      table.insert(all_filenames, default_full_path)
-    end
-  end
-  local files = self.opts.org_agenda_files
-  if not files or files == '' or (type(files) == 'table' and vim.tbl_isempty(files)) then
-    return all_filenames
-  end
-  if type(files) ~= 'table' then
-    files = { files }
-  end
-
-  local all_files = vim.tbl_map(function(file)
-    return vim.tbl_map(function(path)
-      return vim.fn.resolve(path)
-    end, vim.fn.glob(vim.fn.fnamemodify(file, ':p'), 0, 1))
-  end, files)
-
-  all_files = utils.concat(vim.tbl_flatten(all_files), all_filenames, true)
-
-  return vim.tbl_filter(function(file)
-    local ext = vim.fn.fnamemodify(file, ':e')
-    return ext == 'org' or ext == 'org_archive'
-  end, all_files)
-end
-
 ---@return number
 function Config:get_week_start_day_number()
   return utils.convert_from_isoweekday(1)
@@ -282,7 +250,7 @@ function Config:setup_mappings(category, buffer)
     vim.b.org_old_cr_mapping = utils.get_keymap({
       mode = 'i',
       lhs = '<CR>',
-      buffer = buffer,
+      buffer = buffer or vim.api.nvim_get_current_buf(),
     })
   end
   if self.opts.mappings.disable_all then
@@ -354,6 +322,16 @@ function Config:is_archive_file(file)
   return vim.fn.fnamemodify(file, ':e') == 'org_archive'
 end
 
+function Config:exclude_tags(tags)
+  if vim.tbl_isempty(self.opts.org_tags_exclude_from_inheritance) then
+    return tags
+  end
+
+  return vim.tbl_filter(function(tag)
+    return not vim.tbl_contains(self.opts.org_tags_exclude_from_inheritance, tag)
+  end, tags)
+end
+
 function Config:get_inheritable_tags(headline)
   if not headline.tags or not self.opts.org_use_tag_inheritance then
     return {}
@@ -379,28 +357,18 @@ function Config:setup_ts_predicates()
 
     return false
   end, true)
-end
 
-function Config:ts_highlights_enabled()
-  if self.ts_hl_enabled ~= nil then
-    return self.ts_hl_enabled
-  end
-  self.ts_hl_enabled = false
-  local hl_module = require('nvim-treesitter.configs').get_module('highlight')
-  if not hl_module or not hl_module.enable then
-    return false
-  end
-  if hl_module.disable then
-    if type(hl_module.disable) == 'function' and hl_module.disable('org', vim.api.nvim_get_current_buf()) then
-      return false
+  vim.treesitter.query.add_directive('org-set-block-language!', function(match, _, bufnr, pred, metadata)
+    local lang_node = match[pred[2]]
+    if not lang_node then
+      return
     end
-
-    if type(hl_module.disable) == 'table' and vim.tbl_contains(hl_module.disable, 'org') then
-      return false
+    local text = vim.treesitter.get_node_text(lang_node, bufnr)
+    if not text or vim.trim(text) == '' then
+      return
     end
-  end
-  self.ts_hl_enabled = true
-  return self.ts_hl_enabled
+    metadata['injection.language'] = utils.detect_filetype(text)
+  end, true)
 end
 
 ---@param content table
@@ -414,34 +382,65 @@ function Config:respect_blank_before_new_entry(content, option, prepend_content)
   return content
 end
 
+---Check if buffer should apply indentation
+---@param bufnr number
+---@return boolean
+function Config:should_indent(bufnr)
+  if bufnr > -1 and vim.b[bufnr].org_indent_mode then
+    return not self.opts.org_indent_mode_turns_off_org_adapt_indentation
+  end
+
+  return self.org_adapt_indentation
+end
+
 ---@param amount number
+---@param bufnr number
 ---@return string
-function Config:get_indent(amount)
-  if self.org_adapt_indentation then
+function Config:get_indent(amount, bufnr)
+  if self:should_indent(bufnr) then
     return string.rep(' ', amount)
   end
+
   return ''
 end
 
----@param content table|string
----@param amount number
-function Config:apply_indent(content, amount)
-  local indent = self:get_indent(amount)
-
-  if indent == '' then
-    return content
+---@param bufnr number
+---@return boolean
+function Config:hide_leading_stars(bufnr)
+  if self.org_hide_leading_stars then
+    return true
   end
 
-  if type(content) ~= 'table' then
-    return indent .. content
+  if vim.b[bufnr].org_indent_mode and self.org_indent_mode_turns_on_hiding_stars then
+    return true
   end
 
-  for i, line in ipairs(content) do
-    content[i] = indent .. line
-  end
-  return content
+  return false
 end
 
----@type Config
+---@param args string
+---@return table<string, string[]>
+function Config:parse_header_args(args)
+  local results = {}
+  local current_argument = nil
+  local list = vim.split(args, '%s+')
+  for _, param in ipairs(list) do
+    local is_header_argument = param:sub(1, 1) == ':'
+    if is_header_argument then
+      results[param:lower()] = {}
+      current_argument = param:lower()
+    elseif current_argument then
+      table.insert(results[current_argument], param)
+    end
+  end
+
+  for name, value in pairs(results) do
+    results[name] = table.concat(value, ' ')
+  end
+
+  return results
+end
+
+---@type OrgConfig
 instance = Config:new()
 return instance

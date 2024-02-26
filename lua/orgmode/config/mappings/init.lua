@@ -49,7 +49,7 @@ return {
     org_capture_show_help = m.action('org_mappings.show_help', { opts = { desc = 'org show help' } }),
   },
   note = {
-    org_note_finalize = m.action('capture.closing_note.refile', { opts = { desc = 'org finalize note' } }),
+    org_note_finalize = m.action('capture.closing_note.finish', { opts = { desc = 'org finalize note' } }),
     org_note_kill = m.action('capture.closing_note.kill', { opts = { desc = 'org kill note' } }),
     org_note_show_help = m.action('org_mappings.show_help', { opts = { desc = 'org show help' } }),
   },
@@ -93,7 +93,7 @@ return {
       'org_mappings.do_demote',
       { args = { true }, opts = { desc = 'org demote subtree' } }
     ),
-    org_meta_return = m.action('org_mappings.handle_return', { opts = { desc = 'org meta return' } }),
+    org_meta_return = m.action('org_mappings.meta_return', { opts = { desc = 'org meta return' } }),
     org_insert_heading_respect_content = m.action(
       'org_mappings.insert_heading_respect_content',
       { opts = { desc = 'org insert headline (respect content)' } }
@@ -139,6 +139,7 @@ return {
     org_clock_goto = m.action('clock.org_clock_goto', { opts = { desc = 'org clock goto' } }),
     org_set_effort = m.action('clock.org_set_effort', { opts = { desc = 'org set effort' } }),
     org_show_help = m.action('org_mappings.show_help', { opts = { desc = 'org show help' } }),
+    org_babel_tangle = m.action('org_mappings.org_babel_tangle', { opts = { desc = 'org tangle' } }),
   },
   edit_src = {
     org_edit_src_abort = m.custom(

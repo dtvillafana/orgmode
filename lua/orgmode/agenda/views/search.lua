@@ -1,17 +1,16 @@
 local AgendaFilter = require('orgmode.agenda.filter')
 local AgendaTodosView = require('orgmode.agenda.views.todos')
-local Files = require('orgmode.parser.files')
-local Range = require('orgmode.parser.range')
+local Range = require('orgmode.files.elements.range')
 local utils = require('orgmode.utils')
 
----@class AgendaSearchView
----@field items table[]
+---@class OrgAgendaSearchView
+---@field items OrgHeadline[]
 ---@field content table[]
 ---@field highlights table[]
 ---@field header string
 ---@field search string
----@field filters AgendaFilter
----@field win_width number
+---@field filters OrgAgendaFilter
+---@field files OrgFiles
 local AgendaSearchView = {}
 
 function AgendaSearchView:new(opts)
@@ -23,7 +22,7 @@ function AgendaSearchView:new(opts)
     search = opts.search or '',
     filters = opts.filters or AgendaFilter:new(),
     header = opts.org_agenda_overriding_header,
-    win_width = opts.win_width or utils.winwidth(),
+    files = opts.files,
   }
 
   setmetatable(data, self)
@@ -37,7 +36,7 @@ function AgendaSearchView:build()
     search_term = vim.fn.OrgmodeInput('Enter search term: ', self.search)
   end
   self.search = search_term
-  self.items = Files.find_headlines_matching_search_term(search_term, false, true)
+  self.items = self.files:find_headlines_matching_search_term(search_term, false, true)
   if self.filters:should_filter() then
     self.items = vim.tbl_filter(function(item)
       return self.filters:matches(item)
@@ -54,7 +53,7 @@ function AgendaSearchView:build()
   }
 
   self.active_view = 'search'
-  AgendaTodosView.generate_view(self.items, self.content, self.filters, self.win_width)
+  AgendaTodosView.generate_view(self.items, self.content, self.filters)
   return self
 end
 

@@ -5,6 +5,7 @@ end
 vim.b.did_ftplugin = true
 
 local config = require('orgmode.config')
+local utils = require('orgmode.utils')
 
 config:setup_mappings('org')
 config:setup_mappings('text_objects')
@@ -13,19 +14,24 @@ config:setup_foldlevel()
 if config.org_startup_indented then
   vim.b.org_indent_mode = true
 end
-require("orgmode.org.indent").setup()
+require('orgmode.org.indent').setup_virtual_indent()
 
+vim.b.org_bufnr = vim.api.nvim_get_current_buf()
 vim.bo.modeline = false
 vim.opt_local.fillchars:append('fold: ')
 vim.opt_local.foldmethod = 'expr'
 vim.opt_local.foldexpr = 'nvim_treesitter#foldexpr()'
-vim.opt_local.foldtext = 'v:lua.require("orgmode.org.indent").foldtext()'
+if utils.has_version_10() then
+  vim.opt_local.foldtext = ''
+else
+  vim.opt_local.foldtext = 'v:lua.require("orgmode.org.indent").foldtext()'
+end
 vim.opt_local.formatexpr = 'v:lua.require("orgmode.org.format")()'
 vim.opt_local.omnifunc = 'v:lua.orgmode.omnifunc'
 vim.opt_local.commentstring = '# %s'
 
 _G.orgmode.omnifunc = function(findstart, base)
-  return require('orgmode.org.autocompletion.omni').omnifunc(findstart, base)
+  return require('orgmode').completion:omnifunc(findstart, base)
 end
 
 local abbreviations = {
@@ -37,4 +43,11 @@ local abbreviations = {
 
 for abbrev, cmd in pairs(abbreviations) do
   vim.cmd.inoreabbrev(('<silent><buffer> %s <C-R>=luaeval("%s")<CR>'):format(abbrev, cmd))
+end
+
+for _, char in ipairs({ '*', '=', '/', '+', '~', '_' }) do
+  vim.keymap.set('x', 'i' .. char, ':<C-u>normal! T' .. char .. 'vt' .. char .. '<CR>')
+  vim.keymap.set('o', 'i' .. char, ':normal vi' .. char .. '<CR>')
+  vim.keymap.set('x', 'a' .. char, ':<C-u>normal! F' .. char .. 'vf' .. char .. '<CR>')
+  vim.keymap.set('o', 'a' .. char, ':normal va' .. char .. '<CR>')
 end

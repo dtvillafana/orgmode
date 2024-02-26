@@ -45,7 +45,6 @@ Use your favourite package manager:
     require('nvim-treesitter.configs').setup({
       highlight = {
         enable = true,
-        additional_vim_regex_highlighting = { 'org' },
       },
       ensure_installed = { 'org' },
     })
@@ -110,13 +109,8 @@ require('orgmode').setup_ts_grammar()
 
 -- Treesitter configuration
 require('nvim-treesitter.configs').setup {
-  -- If TS highlights are not enabled at all, or disabled via `disable` prop,
-  -- highlighting will fallback to default Vim syntax highlighting
   highlight = {
     enable = true,
-    -- Required for spellcheck, some LaTex highlights and
-    -- code block highlights that do not have ts grammar
-    additional_vim_regex_highlighting = {'org'},
   },
   ensure_installed = {'org'}, -- Or run :TSUpdate org
 }
@@ -137,20 +131,6 @@ require('orgmode').setup_ts_grammar() ...
 EOF
 ```
 #### Completion
-
-<details>
-  <summary><a href="https://github.com/hrsh7th/nvim-compe"><b>nvim-compe</b></a></summary>
-  </br>
-
-```lua
-require('compe').setup({
-  source = {
-    orgmode = true
-  }
-})
-```
-
-</details>
 
 <details>
   <summary><a href="https://github.com/hrsh7th/nvim-cmp"><b>nvim-cmp</b></a></summary>
