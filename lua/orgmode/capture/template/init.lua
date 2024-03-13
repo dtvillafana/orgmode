@@ -34,8 +34,6 @@ local expansions = {
   end,
 }
 
----@alias OrgCaptureTemplateDatetree boolean | { time_prompt: boolean, date?: OrgDate }
-
 ---@class OrgCaptureTemplate
 ---@field description? string
 ---@field template? string|string[]
@@ -97,9 +95,46 @@ function Template:setup()
 end
 
 function Template:validate_options()
+  self:_validate_regexp()
+  if self.datetree then
+    if type(self.datetree) == 'table' then
+      if self.datetree.tree_type == 'custom' and not self.datetree.tree then
+        utils.echo_error('Custom datetree type requires a tree option')
+      end
+    end
+  end
+end
+
+function Template:_validate_regexp()
   if self.headline and self.regexp then
     local desc = self.description ~= '' and self.description or self.template
     utils.echo_error(('Cannot use both headline and regexp options in the same capture template "%s"'):format(desc))
+  end
+end
+
+function Template:_validate_datetree()
+  if not self.datetree or self.datetree == true then
+    return
+  end
+  if type(self.datetree) ~= 'table' then
+    return utils.echo_error('Datetree option must be a table or a boolean')
+  end
+  if self.datetree.tree_type then
+    local valid_tree_types = { 'day', 'week', 'month', 'custom' }
+    if not vim.tbl_contains(valid_tree_types, self.datetree.tree_type) then
+      return utils.echo_error(('Invalid tree type "%s"'):format(self.datetree.tree_type))
+    end
+
+    if self.datetree.tree_type == 'custom' then
+      if not self.datetree.tree or type(self.datetree.tree) ~= 'table' then
+        return utils.echo_error('Custom tree type requires a tree option to be a table (array of OrgDatetreeTreeItem)')
+      end
+      if #self.datetree.tree == 0 then
+        return utils.echo_error(
+          'Custom tree type requires a tree option to be a non-empty table (array of OrgDatetreeTreeItem)'
+        )
+      end
+    end
   end
 end
 
@@ -130,11 +165,14 @@ function Template:prompt_for_inputs()
   end)
 end
 
-function Template:get_datetree_date()
-  if self:has_input_prompts() then
-    return self.datetree.date
-  end
-  return Date.today()
+---@return OrgCaptureTemplateDatetreeOpts
+function Template:get_datetree_opts()
+  ---@diagnostic disable-next-line: param-type-mismatch
+  local datetree = vim.deepcopy(self.datetree)
+  datetree = (type(datetree) == 'table' and datetree) or {}
+  datetree.date = datetree.date or Date.today()
+  datetree.tree_type = datetree.tree_type or 'day'
+  return datetree
 end
 
 ---@return string
@@ -175,7 +213,7 @@ function Template:_compile_expansions(content, found_expansions)
   found_expansions = found_expansions or expansions
   for expansion, compiler in pairs(found_expansions) do
     if content:match(vim.pesc(expansion)) then
-      content = content:gsub(vim.pesc(expansion), compiler())
+      content = content:gsub(vim.pesc(expansion), vim.pesc(compiler()))
     end
   end
   return content

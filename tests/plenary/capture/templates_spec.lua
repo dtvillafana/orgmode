@@ -24,13 +24,28 @@ describe('Capture template', function()
     vim.fn.setreg('+', clip_backup)
   end)
 
+  it('should escape the compiled content', function()
+    ---Backup and restore the clipboard
+    local clip_backup = vim.fn.getreg('+')
+    vim.fn.setreg('+', 'nvim-orgmode%20is%20great!')
+    local template = Template:new({
+      template = '* TODO [[%x][]]\n',
+    })
+
+    assert.are.same({
+      '* TODO [[nvim-orgmode%20is%20great!][]]',
+      '',
+    }, template:compile())
+    vim.fn.setreg('+', clip_backup)
+  end)
+
   it('gets current date for datetree enabled with true', function()
     local template = Template:new({
       template = '* %?',
       datetree = true,
     })
 
-    assert.are.same(Date.today():to_string(), template:get_datetree_date():to_string())
+    assert.are.same(Date.today():to_string(), template:get_datetree_opts().date:to_string())
   end)
 
   it('gets a proper date for datetree enabled as time prompt', function()
@@ -43,6 +58,6 @@ describe('Capture template', function()
       },
     })
 
-    assert.are.same(date:to_string(), template:get_datetree_date():to_string())
+    assert.are.same(date:to_string(), template:get_datetree_opts().date:to_string())
   end)
 end)

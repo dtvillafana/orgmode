@@ -344,38 +344,6 @@ function utils.prompt_autocomplete(arg_lead, list, split_chars)
   end, matches)
 end
 
----@param items table
-function utils.choose(items)
-  items = items or {}
-
-  local output = {}
-  for _, item in ipairs(items) do
-    table.insert(output, { '[' })
-    table.insert(output, { item.choice_text, item.choice_hl or 'Normal' })
-    table.insert(output, { ']' })
-
-    if item.desc_text then
-      table.insert(output, { ' ' })
-      table.insert(output, { item.desc_text, item.desc_hl or 'Normal' })
-    end
-
-    table.insert(output, { '  ' })
-  end
-
-  table.insert(output, { '\n' })
-  vim.api.nvim_echo(output, true, {})
-
-  local raw = vim.fn.nr2char(vim.fn.getchar())
-  local char = string.lower(raw)
-  vim.cmd('redraw!')
-
-  for _, item in ipairs(items) do
-    if char == string.lower(item.choice_value) then
-      return { choice_value = item.choice_value, choice_text = item.choice_text, raw = raw, ctx = item.ctx }
-    end
-  end
-end
-
 function utils.current_file_path()
   return vim.api.nvim_buf_get_name(0)
 end
@@ -465,7 +433,11 @@ function utils.open_tmp_org_window(height, split_mode, border, on_close)
 
   return function()
     vim.api.nvim_create_augroup('OrgTmpWindow', { clear = true })
-    vim.api.nvim_win_close(0, true)
+    if #vim.api.nvim_list_wins() == 1 then
+      vim.cmd('q!')
+    else
+      pcall(vim.api.nvim_win_close, 0, true)
+    end
     if prev_winnr and vim.api.nvim_win_is_valid(prev_winnr) then
       vim.api.nvim_set_current_win(prev_winnr)
     end
@@ -480,7 +452,7 @@ function utils.open_float(name, opts)
   opts.border = opts.border or 'single'
   -- Make sure number is between 0 and 1
   local scale = math.min(math.max(0, opts.scale), 1)
-  local bufnr = vim.api.nvim_create_buf(false, true)
+  local bufnr = vim.api.nvim_create_buf(false, false)
   vim.api.nvim_buf_set_name(bufnr, name)
 
   local width = math.floor((vim.o.columns * scale))
@@ -536,6 +508,7 @@ function utils.edit_file(filename)
   return {
     open = function()
       local bufnr = vim.fn.bufadd(filename) or -1
+      vim.api.nvim_buf_set_var(bufnr, 'org_tmp_edit_window', true)
       vim.api.nvim_open_win(bufnr, true, {
         relative = 'editor',
         width = 1,

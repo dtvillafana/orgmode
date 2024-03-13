@@ -5,6 +5,7 @@ local Headline = require('orgmode.files.headline')
 local ts = vim.treesitter
 local config = require('orgmode.config')
 local Block = require('orgmode.files.elements.block')
+local Link = require('orgmode.org.hyperlinks.link')
 
 ---@class OrgFileMetadata
 ---@field mtime number
@@ -15,7 +16,7 @@ local Block = require('orgmode.files.elements.block')
 ---@field lines string[]
 ---@field content string
 ---@field metadata OrgFileMetadata
----@field parser LanguageTree
+---@field parser vim.treesitter.LanguageTree
 ---@field root TSNode
 local OrgFile = {}
 
@@ -84,7 +85,7 @@ function OrgFile:reload()
   local bufnr = self:bufnr()
 
   if bufnr > -1 then
-    local updated_file = self:_update_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+    local updated_file = self:_update_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), bufnr)
     return Promise.resolve(updated_file)
   end
 
@@ -108,17 +109,13 @@ function OrgFile:is_modified()
   local bufnr = self:bufnr()
   if bufnr > -1 then
     local cur_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-    local is_changed = cur_changedtick ~= self.metadata.changedtick
-    self.metadata.changedtick = cur_changedtick
-    return is_changed
+    return cur_changedtick ~= self.metadata.changedtick
   end
   local stat = vim.loop.fs_stat(self.filename)
   if not stat then
     return false
   end
-  local is_changed = stat.mtime.nsec ~= self.metadata.mtime
-  self.metadata.mtime = stat.mtime.nsec
-  return is_changed
+  return stat.mtime.nsec ~= self.metadata.mtime
 end
 
 ---Parse the file and update the root node
@@ -466,7 +463,7 @@ function OrgFile:get_blocks()
 end
 
 function OrgFile:get_header_args()
-  local header_args_prop = self:get_property('header-args')
+  local header_args_prop = self:get_directive_property('header-args')
   if not header_args_prop then
     return vim.tbl_extend('force', {}, config.org_babel_default_header_args)
   end
@@ -474,17 +471,17 @@ function OrgFile:get_header_args()
   return vim.tbl_extend('force', config.org_babel_default_header_args, header_args)
 end
 
-memoize('get_property')
+memoize('get_directive_property')
 --- @param name string
 --- @return string | nil
-function OrgFile:get_property(name)
-  local properties = self:get_properties()
+function OrgFile:get_directive_property(name)
+  local properties = self:get_directive_properties()
   return properties[name:lower()]
 end
 
-memoize('get_properties')
+memoize('get_directive_properties')
 ---@return table<string, string>
-function OrgFile:get_properties()
+function OrgFile:get_directive_properties()
   self:parse(true)
   local properties = {}
   local directives_body = self.root:field('body')[1]
@@ -512,6 +509,57 @@ function OrgFile:get_properties()
   end
 
   return properties
+end
+
+memoize('get_drawer')
+---@return table<string, string> | nil
+function OrgFile:get_drawer(name)
+  self:parse(true)
+  local document_body = self.root:field('body')[1]
+  if not document_body then
+    return nil
+  end
+
+  local drawer = utils.find(ts_utils.get_named_children(document_body), function(node)
+    if node:type() == 'drawer' then
+      local drawer_name = node:field('name')[1]
+      if drawer_name and self:get_node_text(drawer_name):lower() == name:lower() then
+        return true
+      end
+    end
+    return false
+  end)
+
+  if not drawer or #drawer:field('contents') == 0 then
+    return nil
+  end
+
+  return drawer
+end
+
+memoize('get_properties')
+---@return table<string, string>
+function OrgFile:get_properties()
+  local property_drawer = self:get_drawer('properties')
+  if not property_drawer then
+    return {}
+  end
+  local properties = {}
+  local contents = self:get_node_text_list(property_drawer:field('contents')[1])
+  for _, line in ipairs(contents) do
+    local property_name, property_value = line:match('^%s*:([^:]-):%s*(.*)$')
+    if property_name and property_value then
+      properties[property_name:lower()] = property_value
+    end
+  end
+  return properties
+end
+
+memoize('get_property')
+---@return string | nil
+function OrgFile:get_property(name)
+  local property_drawer = self:get_properties()
+  return property_drawer[name:lower()]
 end
 
 memoize('get_category')
@@ -547,6 +595,23 @@ function OrgFile:get_archive_file_location()
   return config:parse_archive_location(self.filename, archive_location)
 end
 
+memoize('get_links')
+---@return OrgLink[]
+function OrgFile:get_links()
+  self:parse(true)
+  local ts_query = ts_utils.get_query([[
+      (paragraph (expr) @links)
+      (drawer (contents (expr) @links))
+      (headline (item (expr)) @links)
+  ]])
+
+  local links = {}
+  for _, match in ts_query:iter_captures(self.root, self:_get_source()) do
+    vim.list_extend(links, Link.all_from_line(self:get_node_text(match)))
+  end
+  return links
+end
+
 ---@private
 ---@return string | nil
 function OrgFile:_get_directive(directive_name)
@@ -577,10 +642,16 @@ end
 
 ---@private
 ---@param lines string[]
-function OrgFile:_update_lines(lines)
+---@param bufnr? number
+function OrgFile:_update_lines(lines, bufnr)
   self.lines = lines
   self.content = table.concat(lines, '\n')
   self:parse()
+  if bufnr then
+    self.metadata.changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+  else
+    self.metadata.mtime = vim.loop.fs_stat(self.filename).mtime.nsec
+  end
   return self
 end
 

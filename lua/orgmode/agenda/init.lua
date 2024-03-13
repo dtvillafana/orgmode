@@ -69,15 +69,16 @@ function Agenda:tags_todo()
   return self:tags({ todo_only = true })
 end
 
----@return number|nil window id
+---@return number buffer number
 function Agenda:open_window()
   -- if an agenda window is already open, return it
   for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
     local ft = vim.api.nvim_get_option_value('filetype', {
-      buf = vim.api.nvim_win_get_buf(win),
+      buf = buf,
     })
     if ft == 'orgagenda' then
-      return win
+      return buf
     end
   end
 
@@ -87,7 +88,7 @@ function Agenda:open_window()
   vim.cmd([[setlocal buftype=nofile bufhidden=wipe nobuflisted nolist noswapfile nowrap nospell]])
   vim.w.org_window_pos = vim.fn.win_screenpos(0)
   config:setup_mappings('agenda')
-  return vim.fn.win_getid()
+  return vim.fn.bufnr()
 end
 
 function Agenda:prompt()
@@ -147,8 +148,7 @@ function Agenda:_render(skip_rebuild)
       utils.concat(self.highlights, view.highlights)
     end
   end
-  local win = self:open_window()
-  vim.cmd(vim.fn.win_id2win(win) .. 'wincmd w')
+  local bufnr = self:open_window()
   if vim.w.org_window_split_mode == 'horizontal' then
     local win_height = math.max(math.min(34, #self.content), config.org_agenda_min_height)
     if vim.w.org_window_pos and vim.deep_equal(vim.fn.win_screenpos(0), vim.w.org_window_pos) then
@@ -161,14 +161,14 @@ function Agenda:_render(skip_rebuild)
   local lines = vim.tbl_map(function(item)
     return item.line_content
   end, self.content)
-  vim.bo.modifiable = true
-  vim.api.nvim_buf_set_lines(0, 0, -1, true, lines)
-  vim.bo.modifiable = false
-  vim.bo.modified = false
-  colors.highlight(self.highlights, true)
+  vim.bo[bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, lines)
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].modified = false
+  colors.highlight(self.highlights, true, bufnr)
   vim.tbl_map(function(item)
     if item.highlights then
-      return colors.highlight(item.highlights)
+      return colors.highlight(item.highlights, false, bufnr)
     end
   end, self.content)
   if not skip_rebuild then
@@ -181,7 +181,7 @@ function Agenda:reset()
 end
 
 function Agenda:redo(preserve_cursor_pos)
-  self.files:load(true):next(vim.schedule_wrap(function()
+  return self.files:load(true):next(vim.schedule_wrap(function()
     local cursor_view = nil
     if preserve_cursor_pos then
       cursor_view = vim.fn.winsaveview() or {}
@@ -251,6 +251,13 @@ end
 function Agenda:clock_in()
   return self:_remote_edit({
     action = 'clock.org_clock_in',
+    redo = true,
+  })
+end
+
+function Agenda:refile()
+  return self:_remote_edit({
+    action = 'capture.refile_headline_to_destination',
     redo = true,
   })
 end
@@ -428,14 +435,33 @@ function Agenda:_remote_edit(opts)
     if not opts.update_in_place or not headline then
       return
     end
-    if item.agenda_item then
-      item.agenda_item:set_headline(headline)
-      self.content[line] =
-        AgendaView.build_agenda_item_content(item.agenda_item, item.longest_category, item.longest_date, item.line)
-    else
-      self.content[line] = AgendaTodosView.generate_todo_item(headline, item.longest_category, item.line)
+    local line_range_same = headline:get_range():is_same_line_range(item.headline:get_range())
+
+    local update_item_inline = function()
+      if item.agenda_item then
+        item.agenda_item:set_headline(headline)
+        self.content[line] =
+          AgendaView.build_agenda_item_content(item.agenda_item, item.longest_category, item.longest_date, item.line)
+      else
+        self.content[line] = AgendaTodosView.generate_todo_item(headline, item.longest_category, item.line)
+      end
+      return self:_render(true)
     end
-    return self:_render(true)
+
+    if line_range_same then
+      return update_item_inline()
+    end
+
+    -- If line range was changed, some other agenda items might have outdated position
+    -- In that case, we need to reload the agenda and try to find the same headline to update it in place
+    return self:redo(true):next(function()
+      for content_line, content_item in pairs(self.content) do
+        if content_item.headline and content_item.headline:is_same(headline) then
+          item = self.content[content_line]
+          return update_item_inline()
+        end
+      end
+    end)
   end)
 end
 

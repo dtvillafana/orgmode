@@ -4,10 +4,11 @@ local fs = require('orgmode.utils.fs')
 local defaults = require('orgmode.config.defaults')
 ---@type table<string, OrgMapEntry>
 local mappings = require('orgmode.config.mappings')
+local TodoKeywords = require('orgmode.objects.todo_keywords')
 
 ---@class OrgConfig:OrgDefaultConfig
 ---@field opts table
----@field todo_keywords table
+---@field todo_keywords OrgTodoKeywords
 local Config = {}
 
 ---@param opts? table
@@ -127,24 +128,6 @@ end
 
 function Config:_deprecation_notify(opts)
   local messages = {}
-  if
-    opts.mappings
-    and opts.mappings.org
-    and (opts.mappings.org.org_increase_date or opts.mappings.org.org_decrease_date)
-  then
-    table.insert(
-      messages,
-      'org_increase_date/org_decrease_date mappings are deprecated in favor of org_timestamp_up/org_timestamp_down (More granular increase/decrease).'
-    )
-    table.insert(messages, 'See https://github.com/nvim-orgmode/orgmode/blob/tree-sitter/DOCS.md#changelog')
-    if opts.mappings.org.org_increase_date then
-      opts.mappings.org.org_timestamp_up = opts.mappings.org.org_increase_date
-    end
-    if opts.mappings.org.org_decrease_date then
-      opts.mappings.org.org_timestamp_down = opts.mappings.org.org_decrease_date
-    end
-  end
-
   if opts.org_indent_mode and type(opts.org_indent_mode) == 'string' then
     table.insert(
       messages,
@@ -198,47 +181,16 @@ function Config:get_agenda_span()
   return span
 end
 
+---@return OrgTodoKeywords
 function Config:get_todo_keywords()
   if self.todo_keywords then
-    return vim.deepcopy(self.todo_keywords)
+    return self.todo_keywords
   end
-  local parse_todo = function(val)
-    local value, shortcut = val:match('(.*)%((.)[^%)]*%)$')
-    if value and shortcut then
-      return { value = value, shortcut = shortcut, custom_shortcut = true }
-    end
-    return { value = val, shortcut = val:sub(1, 1):lower(), custom_shortcut = false }
-  end
-  local types = { TODO = {}, DONE = {}, ALL = {}, KEYS = {}, FAST_ACCESS = {}, has_fast_access = false }
-  local type = 'TODO'
-  local has_separator = vim.tbl_contains(self.opts.org_todo_keywords, '|')
-  for i, word in ipairs(self.opts.org_todo_keywords) do
-    if word == '|' then
-      type = 'DONE'
-    else
-      if not has_separator and i == #self.opts.org_todo_keywords then
-        type = 'DONE'
-      end
-      local data = parse_todo(word)
-      if not types.has_fast_access and data.custom_shortcut then
-        types.has_fast_access = true
-      end
-      table.insert(types[type], data.value)
-      table.insert(types.ALL, data.value)
-      types.KEYS[data.value] = {
-        type = type,
-        shortcut = data.shortcut,
-        len = data.value:len(),
-      }
-      table.insert(types.FAST_ACCESS, {
-        value = data.value,
-        type = type,
-        shortcut = data.shortcut,
-      })
-    end
-  end
-  self.todo_keywords = types
-  return types
+  self.todo_keywords = TodoKeywords:new({
+    org_todo_keywords = self.opts.org_todo_keywords,
+    org_todo_keyword_faces = self.opts.org_todo_keyword_faces,
+  })
+  return self.todo_keywords
 end
 
 --- Setup mappings for a given category and buffer
@@ -354,7 +306,7 @@ function Config:get_priorities()
 end
 
 function Config:setup_ts_predicates()
-  local todo_keywords = self:get_todo_keywords().KEYS
+  local todo_keywords = self:get_todo_keywords():keys()
   local valid_priorities = self:get_priorities()
 
   vim.treesitter.query.add_predicate('org-is-todo-keyword?', function(match, _, source, predicate)
@@ -365,7 +317,7 @@ function Config:setup_ts_predicates()
     end
 
     return false
-  end, true)
+  end, { force = true })
 
   vim.treesitter.query.add_predicate('org-is-valid-priority?', function(match, _, source, predicate)
     local node = match[predicate[2]]
@@ -400,7 +352,7 @@ function Config:setup_ts_predicates()
     local todo_text = vim.treesitter.get_node_text(prev_sibling, source)
     local is_prev_sibling_todo_keyword = todo_keywords[todo_text] and true or false
     return is_prev_sibling_todo_keyword
-  end, true)
+  end, { force = true })
 
   vim.treesitter.query.add_directive('org-set-block-language!', function(match, _, bufnr, pred, metadata)
     local lang_node = match[pred[2]]
@@ -411,8 +363,8 @@ function Config:setup_ts_predicates()
     if not text or vim.trim(text) == '' then
       return
     end
-    metadata['injection.language'] = utils.detect_filetype(text)
-  end, true)
+    metadata['injection.language'] = utils.detect_filetype(text) or text
+  end, { force = true })
 end
 
 ---@param content table

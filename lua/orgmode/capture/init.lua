@@ -8,20 +8,6 @@ local CaptureWindow = require('orgmode.capture.window')
 local Date = require('orgmode.objects.date')
 local Datetree = require('orgmode.capture.template.datetree')
 
----@class OrgProcessRefileOpts
----@field source_headline OrgHeadline
----@field destination_file? OrgFile
----@field destination_headline? OrgHeadline
----@field lines? string[]
----@field message? string
-
----@class OrgProcessCaptureOpts
----@field template OrgCaptureTemplate
----@field source_file OrgFile
----@field source_headline? OrgHeadline
----@field destination_file OrgFile
----@field destination_headline? OrgHeadline
-
 ---@class OrgCapture
 ---@field templates OrgCaptureTemplates
 ---@field closing_note OrgCaptureWindow
@@ -30,11 +16,11 @@ local Datetree = require('orgmode.capture.template.datetree')
 local Capture = {}
 Capture.__index = Capture
 
----@param opts { files: OrgFiles }
+---@param opts { files: OrgFiles, templates?: OrgCaptureTemplates }
 function Capture:new(opts)
   local this = setmetatable({}, self)
   this.files = opts.files
-  this.templates = Templates:new()
+  this.templates = opts.templates or Templates:new()
   this.closing_note = this:_setup_closing_note()
   return this
 end
@@ -137,13 +123,16 @@ function Capture:_refile_from_capture_buffer(opts)
   local destination_file = opts.destination_file
   local destination_headline = opts.destination_headline
 
+  if destination_headline then
+    target_line = destination_headline:get_range().end_line
+  end
+
   if opts.template.datetree then
-    destination_headline = Datetree:new({ files = self.files }):create(opts.template)
+    destination_headline, target_line = Datetree:new({ files = self.files }):create(opts.template)
   end
 
   if destination_headline then
     target_level = destination_headline:get_level()
-    target_line = destination_headline:get_range().end_line
   end
 
   local lines = opts.source_file.lines
@@ -213,7 +202,7 @@ function Capture:_refile_from_org_file(opts)
   end
 
   self.files
-    :update_file(destination_file.filename, function(file)
+    :update_file(destination_file.filename, function()
       if is_same_file then
         local item_range = source_headline:get_range()
         return vim.cmd(string.format('silent! %d,%d move %s', item_range.start_line, item_range.end_line, target_line))

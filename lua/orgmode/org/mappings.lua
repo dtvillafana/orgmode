@@ -362,11 +362,12 @@ function OrgMappings:toggle_heading()
     line = line:gsub('^(%s*)', '')
     if line:match('^[%*-]%s') then -- handle lists
       line = line:gsub('^[%*-]%s', '') -- strip bullet
+      local todo_keywords = config:get_todo_keywords()
       line = line:gsub('^%[([X%s])%]%s', function(checkbox_state)
         if checkbox_state == 'X' then
-          return config:get_todo_keywords().DONE[1] .. ' '
+          return todo_keywords:first_by_type('DONE').value .. ' '
         else
-          return config:get_todo_keywords().TODO[1] .. ' '
+          return todo_keywords:first_by_type('TODO').value .. ' '
         end
       end)
     end
@@ -675,24 +676,26 @@ function OrgMappings:insert_heading_respect_content(suffix)
     self:_insert_heading_from_plain_line(suffix)
   else
     local line = config:respect_blank_before_new_entry({ string.rep('*', item:get_level()) .. ' ' .. suffix })
-    vim.fn.append(item:get_range().end_line, line)
-    vim.fn.cursor(item:get_range().end_line + #line, 1)
+    local end_line = item:get_range().end_line
+    vim.fn.append(end_line, line)
+    vim.fn.cursor(end_line + #line, 1)
   end
   return vim.cmd([[startinsert!]])
 end
 
 function OrgMappings:insert_todo_heading_respect_content()
-  return self:insert_heading_respect_content(config:get_todo_keywords().TODO[1] .. ' ')
+  return self:insert_heading_respect_content(config:get_todo_keywords():first_by_type('TODO').value .. ' ')
 end
 
 function OrgMappings:insert_todo_heading()
   local item = self.files:get_closest_headline_or_nil()
+  local first_todo_keyword = config:get_todo_keywords():first_by_type('TODO')
   if not item then
-    self:_insert_heading_from_plain_line(config:get_todo_keywords().TODO[1] .. ' ')
+    self:_insert_heading_from_plain_line(first_todo_keyword.value .. ' ')
     return vim.cmd([[startinsert!]])
   else
     vim.fn.cursor(item:get_range().start_line, 1)
-    return self:meta_return(config:get_todo_keywords().TODO[1] .. ' ')
+    return self:meta_return(first_todo_keyword.value .. ' ')
   end
 end
 
@@ -805,8 +808,8 @@ function OrgMappings:move_subtree_down()
   vim.cmd(string.format(':%d,%dmove %d', range.start_line, range.end_line, next_headline:get_range().end_line))
 end
 
-function OrgMappings:show_help()
-  return Help.show()
+function OrgMappings:show_help(type)
+  return Help.show(type)
 end
 
 function OrgMappings:edit_special()
@@ -983,6 +986,7 @@ end
 ---@param inactive boolean
 function OrgMappings:org_time_stamp(inactive)
   local date = self:_get_date_under_cursor()
+
   if date then
     return Calendar.new({ date = date }).open():next(function(new_date)
       if not new_date then
@@ -1001,8 +1005,9 @@ function OrgMappings:org_time_stamp(inactive)
     local date_string = new_date:to_wrapped_string(not inactive)
     if date_start then
       date_string = '--' .. date_string
+      vim.cmd('norm!x')
     end
-    vim.cmd(string.format('norm!i%s', date_string))
+    vim.cmd(string.format('norm!a%s', date_string))
   end)
 end
 
@@ -1022,7 +1027,7 @@ function OrgMappings:_change_todo_state(direction, use_fast_access)
     elseif direction == 'prev' then
       next_state = todo_state:get_prev()
     elseif direction == 'reset' then
-      next_state = todo_state:get_todo()
+      next_state = todo_state:get_reset_todo(headline)
     end
   end
 
@@ -1032,7 +1037,10 @@ function OrgMappings:_change_todo_state(direction, use_fast_access)
 
   if next_state.value == current_keyword then
     if current_keyword ~= '' then
-      utils.echo_info('TODO state was already ', { { next_state.value, next_state.hl } })
+      utils.echo_info('TODO state was already ', { {
+        next_state.value,
+        next_state.hl,
+      } })
     end
     return false
   end

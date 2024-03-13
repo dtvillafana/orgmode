@@ -1,4 +1,3 @@
-local Help = require('orgmode.objects.help')
 local config = require('orgmode.config')
 local ts_utils = require('orgmode.utils.treesitter')
 local utils = require('orgmode.utils')
@@ -178,10 +177,6 @@ function EditSpecial:_get_nearest_block_node()
     node = block_node,
     children = children_nodes,
   }
-end
-
-EditSpecial.show_help = function()
-  Help.show_help()
 end
 
 EditSpecial.abort = function()

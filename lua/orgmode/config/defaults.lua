@@ -5,6 +5,7 @@ local DefaultConfig = {
   org_agenda_files = '',
   org_default_notes_file = '',
   org_todo_keywords = { 'TODO', '|', 'DONE' },
+  org_todo_repeat_to_state = nil,
   org_todo_keyword_faces = {},
   org_deadline_warning_days = 14,
   org_agenda_min_height = 16,
@@ -104,6 +105,7 @@ local DefaultConfig = {
       org_agenda_deadline = '<prefix>id',
       org_agenda_schedule = '<prefix>is',
       org_agenda_filter = '/',
+      org_agenda_refile = '<prefix>r',
       org_agenda_show_help = 'g?',
     },
     capture = {
