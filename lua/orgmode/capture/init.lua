@@ -8,18 +8,24 @@ local CaptureWindow = require('orgmode.capture.window')
 local Date = require('orgmode.objects.date')
 local Datetree = require('orgmode.capture.template.datetree')
 
+---@alias OrgOnCaptureClose fun(capture:OrgCapture, opts:OrgProcessCaptureOpts)
+
 ---@class OrgCapture
 ---@field templates OrgCaptureTemplates
 ---@field closing_note OrgCaptureWindow
 ---@field files OrgFiles
+---@field on_pre_refile OrgOnCaptureClose
+---@field on_post_refile OrgOnCaptureClose
 ---@field _window OrgCaptureWindow
 local Capture = {}
 Capture.__index = Capture
 
----@param opts { files: OrgFiles, templates?: OrgCaptureTemplates }
+---@param opts { files: OrgFiles, templates?: OrgCaptureTemplates, on_pre_refile?: OrgOnCaptureClose, on_post_refile?: OrgOnCaptureClose }
 function Capture:new(opts)
   local this = setmetatable({}, self)
   this.files = opts.files
+  this.on_pre_refile = opts.on_pre_refile
+  this.on_post_refile = opts.on_post_refile
   this.templates = opts.templates or Templates:new()
   this.closing_note = this:_setup_closing_note()
   return this
@@ -29,27 +35,46 @@ function Capture:prompt()
   self:_create_prompt(self.templates:get_list())
 end
 
+---@private
+function Capture:setup_mappings()
+  local maps = config:get_mappings('capture', vim.api.nvim_get_current_buf())
+  if not maps then
+    return
+  end
+  local capture_map = maps.org_capture_finalize
+  capture_map.map_entry
+    :with_handler(function()
+      return self:refile()
+    end)
+    :attach(capture_map.default_map, capture_map.user_map, capture_map.opts)
+
+  local refile_map = maps.org_capture_refile
+  refile_map.map_entry
+    :with_handler(function()
+      return self:refile_to_destination()
+    end)
+    :attach(refile_map.default_map, refile_map.user_map, refile_map.opts)
+
+  local kill_map = maps.org_capture_kill
+  kill_map.map_entry
+    :with_handler(function()
+      return self:kill()
+    end)
+    :attach(kill_map.default_map, kill_map.user_map, kill_map.opts)
+end
+
 ---@param template OrgCaptureTemplate
 ---@return OrgPromise<OrgCaptureWindow>
 function Capture:open_template(template)
   self._window = CaptureWindow:new({
     template = template,
     on_open = function()
-      return config:setup_mappings('capture')
+      return self:setup_mappings()
     end,
     on_close = function()
       return self:on_refile_close()
     end,
   })
-
-  if template:has_input_prompts() then
-    return template:prompt_for_inputs():next(function(proceed)
-      if not proceed then
-        return utils.echo_info('Canceled.')
-      end
-      return self._window:open()
-    end)
-  end
 
   return self._window:open()
 end
@@ -118,6 +143,9 @@ end
 ---@private
 ---@param opts OrgProcessCaptureOpts
 function Capture:_refile_from_capture_buffer(opts)
+  if self.on_pre_refile then
+    self.on_pre_refile(self, opts)
+  end
   local target_level = 0
   local target_line = -1
   local destination_file = opts.destination_file
@@ -160,6 +188,9 @@ function Capture:_refile_from_capture_buffer(opts)
     end)
     :wait()
 
+  if self.on_post_refile then
+    self.on_post_refile(self, opts)
+  end
   utils.echo_info(('Wrote %s'):format(destination_file.filename))
   self:kill()
   return true
@@ -425,8 +456,25 @@ end
 ---@private
 ---@return OrgProcessCaptureOpts | false
 function Capture:_get_refile_vars()
-  local file = self._window.template:get_target()
+  local source_file = self.files:get_current_file()
+  local source_headline = nil
+  if not self._window.template.whole_file then
+    source_headline = source_file:get_headlines()[1]
+  end
 
+  local opts = {
+    source_file = source_file,
+    source_headline = source_headline,
+    destination_file = nil,
+    destination_headline = nil,
+    template = self._window.template,
+  }
+
+  if self.on_pre_refile then
+    self.on_pre_refile(self, opts)
+  end
+
+  local file = opts.template:get_target()
   if vim.fn.filereadable(file) == 0 then
     local choice = vim.fn.confirm(('Refile destination %s does not exist. Create now?'):format(file), '&Yes\n&No')
     if choice ~= 1 then
@@ -437,25 +485,16 @@ function Capture:_get_refile_vars()
     vim.fn.writefile({}, file)
   end
 
-  local source_file = self.files:get_current_file()
-  local source_headline = source_file:get_headlines()[1]
-  local destination_file = self.files:get(file)
-  local destination_headline = nil
-  if self._window.template.headline then
-    destination_headline = destination_file:find_headline_by_title(self._window.template.headline)
-    if not destination_headline then
-      utils.echo_error(('Refile headline "%s" does not exist in "%s"'):format(self._window.template.headline, file))
+  opts.destination_file = self.files:get(file)
+  if opts.template.headline then
+    opts.destination_headline = opts.destination_file:find_headline_by_title(opts.template.headline)
+    if not opts.destination_headline then
+      utils.echo_error(('Refile headline "%s" does not exist in "%s"'):format(opts.template.headline, file))
       return false
     end
   end
 
-  return {
-    source_file = source_file,
-    source_headline = source_headline,
-    destination_file = destination_file,
-    destination_headline = destination_headline,
-    template = self._window.template,
-  }
+  return opts
 end
 
 ---@private
@@ -474,7 +513,7 @@ function Capture:_setup_closing_note()
       return content
     end,
     on_open = function()
-      config:setup_mappings('note')
+      config:setup_mappings('note', vim.api.nvim_get_current_buf())
     end,
   })
 end

@@ -14,45 +14,72 @@ local Listitem = require('orgmode.files.elements.listitem')
 ---@field all_files table<string, OrgFile> all loaded files, no matter if they are part of paths
 ---@field load_state 'loading' | 'loaded' | nil
 local OrgFiles = {}
+OrgFiles.__index = OrgFiles
 
 ---@param opts OrgFilesOpts
 function OrgFiles:new(opts)
   local data = {
-    paths = opts.paths or {},
     files = {},
     all_files = {},
     load_state = nil,
   }
   setmetatable(data, self)
-  self.__index = self
-  data:load_sync()
+  self.paths = self:_setup_paths(opts.paths)
   return data
 end
 
 ---@param force? boolean Force reload all files
----@return OrgPromise
+---@return OrgPromise<OrgFiles>
 function OrgFiles:load(force)
   if not force and self.load_state then
     if self.load_state == 'loading' then
       self:ensure_loaded()
     end
-    return Promise.resolve(self.files)
+    return Promise.resolve(self)
   end
 
   self.load_state = 'loading'
   local actions = vim.tbl_map(function(filename)
     return self:load_file(filename):next(function(orgfile)
       if orgfile then
-        self.files[filename] = orgfile
+        self.files[orgfile.filename] = orgfile
       end
       return orgfile
     end)
-  end, self:_files())
+  end, self:_files(true))
 
   return Promise.all(actions):next(function()
     self.load_state = 'loaded'
-    return self.files
+    return self
   end)
+end
+
+---@param filename string
+---@return OrgPromise<OrgFile>
+function OrgFiles:add_to_paths(filename)
+  filename = vim.fn.resolve(vim.fn.fnamemodify(filename, ':p'))
+
+  if self.files[filename] then
+    return self.files[filename]:reload()
+  end
+
+  return self:load_file(filename):next(function(orgfile)
+    if orgfile then
+      self.files[filename] = orgfile
+      local all_paths = self:_files()
+      if not vim.tbl_contains(all_paths, filename) then
+        table.insert(self.paths, filename)
+      end
+    end
+    return orgfile
+  end)
+end
+
+---@param filename string
+---@param timeout? number
+---@return OrgFile
+function OrgFiles:add_to_paths_sync(filename, timeout)
+  return self:add_to_paths(filename):wait(timeout)
 end
 
 function OrgFiles:get_tags()
@@ -129,19 +156,18 @@ end
 
 ---@return OrgPromise<OrgFile>
 function OrgFiles:load_file(filename)
+  filename = vim.fn.resolve(vim.fn.fnamemodify(filename, ':p'))
   local file = self.all_files[filename]
   if file then
     return file:reload()
   end
 
-  local promise = OrgFile.load(filename):next(function(orgfile)
+  return OrgFile.load(filename):next(function(orgfile)
     if orgfile then
       self.all_files[filename] = orgfile
     end
     return orgfile
   end)
-
-  return promise
 end
 
 ---@return OrgFile | nil
@@ -156,9 +182,7 @@ function OrgFiles:get(filename)
 end
 
 function OrgFiles:reload(filename)
-  self:load_file(filename):next(function(orgfile)
-    return orgfile
-  end)
+  return self:load_file(filename)
 end
 
 ---@param cursor? table (1, 0) indexed base position tuple
@@ -208,6 +232,7 @@ end
 
 ---@param property_name string
 ---@param term string
+---@return OrgHeadline[]
 function OrgFiles:find_headlines_with_property_matching(property_name, term)
   local headlines = {}
   for _, orgfile in ipairs(self:all()) do
@@ -216,6 +241,33 @@ function OrgFiles:find_headlines_with_property_matching(property_name, term)
     end
   end
   return headlines
+end
+
+---@param property_name string
+---@param term string
+---@return OrgHeadline[]
+function OrgFiles:find_headlines_with_property(property_name, term)
+  local headlines = {}
+  for _, orgfile in ipairs(self:all()) do
+    for _, headline in ipairs(orgfile:find_headlines_with_property(property_name, term)) do
+      table.insert(headlines, headline)
+    end
+  end
+  return headlines
+end
+
+---@param property_name string
+---@param term string
+---@return OrgFile[]
+function OrgFiles:find_files_with_property(property_name, term)
+  local files = {}
+  for _, orgfile in ipairs(self:all()) do
+    local property = orgfile:get_property(property_name)
+    if property and property:lower() == term:lower() then
+      table.insert(files, orgfile)
+    end
+  end
+  return files
 end
 
 ---@param term string
@@ -254,7 +306,9 @@ function OrgFiles:update_file(filename, action)
 
   return Promise.resolve(action(file)):next(function(result)
     edit_file.close()
-    return result
+    return file:reload():next(function()
+      return result
+    end)
   end)
 end
 
@@ -268,27 +322,44 @@ function OrgFiles:ensure_loaded()
 end
 
 ---@private
-function OrgFiles:_files()
-  local all_filenames = {}
-  local files = self.paths
-  if not files or files == '' or (type(files) == 'table' and vim.tbl_isempty(files)) then
-    return all_filenames
-  end
-  if type(files) ~= 'table' then
-    files = { files }
+---@param paths string | string[] | nil
+---@return string[]
+function OrgFiles:_setup_paths(paths)
+  if not paths or paths == '' or (type(paths) == 'table' and vim.tbl_isempty(paths)) then
+    return {}
   end
 
+  if type(paths) ~= 'table' then
+    return { paths }
+  end
+
+  return paths
+end
+
+---@private
+---@param skip_resolve? boolean
+function OrgFiles:_files(skip_resolve)
   local all_files = vim.tbl_map(function(file)
     return vim.tbl_map(function(path)
+      if skip_resolve then
+        return path
+      end
       return vim.fn.resolve(path)
     end, vim.fn.glob(vim.fn.fnamemodify(file, ':p'), false, true))
-  end, files)
+  end, self.paths)
 
-  all_files = utils.concat(vim.tbl_flatten(all_files), all_filenames, true)
+  all_files = vim.tbl_flatten(all_files)
 
   return vim.tbl_filter(function(file)
     local ext = vim.fn.fnamemodify(file, ':e')
-    return ext == 'org' or ext == 'org_archive'
+    local is_org = ext == 'org' or ext == 'org_archive'
+
+    if not is_org then
+      return false
+    end
+
+    local stat = vim.loop.fs_stat(file)
+    return stat and stat.type == 'file' or false
   end, all_files)
 end
 

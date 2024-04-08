@@ -28,6 +28,19 @@ function Config:__index(key)
   return rawget(getmetatable(self), key)
 end
 
+function Config:install_grammar()
+  local ok = pcall(vim.treesitter.language.add, 'org')
+  if ok then
+    return
+  end
+  require('orgmode.utils.treesitter.install').run()
+end
+
+---@param url? string
+function Config:reinstall_grammar(url)
+  return require('orgmode.utils.treesitter.install').run(url)
+end
+
 ---@param opts table
 ---@return OrgConfig
 function Config:extend(opts)
@@ -198,13 +211,27 @@ end
 ---@param buffer number? Buffer id
 ---@see orgmode.config.mappings
 function Config:setup_mappings(category, buffer)
-  if category == 'org' and vim.bo.filetype == 'org' and not vim.b.org_old_cr_mapping then
-    vim.b.org_old_cr_mapping = utils.get_keymap({
+  if category == 'org' and vim.bo.filetype == 'org' and not vim.b[buffer].org_old_cr_mapping then
+    local old_mapping = utils.get_keymap({
       mode = 'i',
       lhs = '<CR>',
-      buffer = buffer or vim.api.nvim_get_current_buf(),
+      buffer = buffer,
     })
+    if old_mapping and old_mapping.rhs ~= '<Cmd>lua require("orgmode").action("org_mappings.org_return")<CR>' then
+      vim.b[buffer].org_old_cr_mapping = old_mapping
+    end
   end
+  local maps = self:get_mappings(category, buffer)
+  if not maps then
+    return
+  end
+
+  for _, map in pairs(maps) do
+    map.map_entry:attach(map.default_map, map.user_map, map.opts)
+  end
+end
+
+function Config:get_mappings(category, buffer)
   if self.opts.mappings.disable_all then
     return
   end
@@ -221,9 +248,16 @@ function Config:setup_mappings(category, buffer)
     opts.prefix = self.opts.mappings.prefix
   end
 
+  local result = {}
   for name, map_entry in pairs(map_entries) do
-    map_entry:attach(default_mappings[name], user_mappings[name], opts)
+    result[name] = {
+      map_entry = map_entry,
+      default_map = default_mappings[name],
+      user_map = user_mappings[name],
+      opts = opts,
+    }
   end
+  return result
 end
 
 --- Setup the foldlevel for a given org file

@@ -11,6 +11,11 @@ local Link = require('orgmode.org.hyperlinks.link')
 ---@field mtime number
 ---@field changedtick number
 
+---@class OrgFileOpts
+---@field filename string
+---@field lines string[]
+---@field bufnr? number
+
 ---@class OrgFile
 ---@field filename string
 ---@field lines string[]
@@ -28,10 +33,6 @@ local memoize = utils.memoize(OrgFile, function(self)
   }, '_')
 end)
 
----@class OrgFileOpts
----@field filename string
----@field lines string[]
----@field bufnr? number
 ---Constructor function, should not be used directly
 ---@param opts OrgFileOpts
 ---@return OrgFile
@@ -272,6 +273,7 @@ function OrgFile:find_headlines_matching_search_term(search_term, no_escape, ign
   end, self:get_headlines_including_archived())
 end
 
+---Find headlines where property value is matching the term partially from start
 ---@param property_name string
 ---@param term string
 ---@return OrgHeadline[]
@@ -279,6 +281,17 @@ function OrgFile:find_headlines_with_property_matching(property_name, term)
   return vim.tbl_filter(function(item)
     local property = item:get_property(property_name)
     return property and property:lower():match('^' .. vim.pesc(term:lower()))
+  end, self:get_headlines())
+end
+
+---Find headlines where property value is matching the term exactly
+---@param property_name string
+---@param term string
+---@return OrgHeadline[]
+function OrgFile:find_headlines_with_property(property_name, term)
+  return vim.tbl_filter(function(item)
+    local property = item:get_property(property_name)
+    return property and property:lower() == term:lower()
   end, self:get_headlines())
 end
 
@@ -606,10 +619,22 @@ function OrgFile:get_links()
   ]])
 
   local links = {}
+  local processed_lines = {}
   for _, match in ts_query:iter_captures(self.root, self:_get_source()) do
-    vim.list_extend(links, Link.all_from_line(self:get_node_text(match)))
+    local line = match:start()
+    if not processed_lines[line] then
+      vim.list_extend(links, Link.all_from_line(self.lines[line + 1], line + 1))
+      processed_lines[line] = true
+    end
   end
   return links
+end
+
+memoize('get_directive')
+---@param directive_name string
+---@return string | nil
+function OrgFile:get_directive(directive_name)
+  return self:_get_directive(directive_name)
 end
 
 ---@private
@@ -656,7 +681,7 @@ function OrgFile:_update_lines(lines, bufnr)
 end
 
 ---@private
----@return LanguageTree
+---@return vim.treesitter.LanguageTree
 function OrgFile:_get_parser()
   local bufnr = self:bufnr()
 

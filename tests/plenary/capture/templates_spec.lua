@@ -19,7 +19,7 @@ describe('Capture template', function()
       os.date('%A'),
       'test',
       'hello world',
-    }, template:compile())
+    }, template:compile():wait())
 
     vim.fn.setreg('+', clip_backup)
   end)
@@ -35,7 +35,7 @@ describe('Capture template', function()
     assert.are.same({
       '* TODO [[nvim-orgmode%20is%20great!][]]',
       '',
-    }, template:compile())
+    }, template:compile():wait())
     vim.fn.setreg('+', clip_backup)
   end)
 
@@ -59,5 +59,32 @@ describe('Capture template', function()
     })
 
     assert.are.same(date:to_string(), template:get_datetree_opts().date:to_string())
+  end)
+
+  it('should process custom compile hooks', function()
+    local template = Template:new({
+      template = '* This is a test {title} and {slug} in headline',
+    })
+    template:on_compile(function(content)
+      content = content:gsub('{title}', 'Org Test')
+      content = content:gsub('{slug}', 'org-test')
+      return content
+    end)
+    assert.are.same({ '* This is a test Org Test and org-test in headline' }, template:compile():wait())
+  end)
+
+  it('should return nil if custom compile hooks return nil', function()
+    local template = Template:new({
+      template = '* This is a test {title} and {slug} in headline',
+    })
+    template:on_compile(function(content)
+      content = content:gsub('{title}', 'Org Test')
+      content = content:gsub('{slug}', 'org-test')
+      return content
+    end)
+    template:on_compile(function()
+      return nil
+    end)
+    assert.is.Nil(template:compile():wait())
   end)
 end)

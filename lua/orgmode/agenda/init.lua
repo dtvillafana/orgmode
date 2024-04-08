@@ -87,7 +87,7 @@ function Agenda:open_window()
   vim.cmd([[setf orgagenda]])
   vim.cmd([[setlocal buftype=nofile bufhidden=wipe nobuflisted nolist noswapfile nowrap nospell]])
   vim.w.org_window_pos = vim.fn.win_screenpos(0)
-  config:setup_mappings('agenda')
+  config:setup_mappings('agenda', vim.api.nvim_get_current_buf())
   return vim.fn.bufnr()
 end
 
@@ -220,9 +220,9 @@ function Agenda:goto_date()
     return utils.echo_error('No available views to jump to date.')
   end
 
-  return Calendar.new({ date = Date.now() }).open():next(function(date)
+  return Calendar.new({ date = Date.now(), title = 'Go to agenda date' }):open():next(function(date)
     if not date then
-      return
+      return nil
     end
     for _, view in ipairs(views) do
       view:goto_date(date)

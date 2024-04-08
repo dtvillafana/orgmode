@@ -487,9 +487,17 @@ Variables:
   * `%F`: Like `%f` but inserts the full path
   * `%n`: Inserts the current `$USER`
   * `%t`: Prints current date (Example: `<2021-06-10 Thu>`)
+  * `%^t`: Prompt for current date (Example: `<2021-06-10 Thu>`)
+  * `%^{Name}t`: Prompt for current date for given `Name` (visible in calendar title) (Example: `<2021-06-10 Thu>`)
   * `%T`: Prints current date and time (Example: `<2021-06-10 Thu 12:30>`)
+  * `%^T`: Prompt for current date and time (Example: `<2021-06-10 Thu 12:30>`)
+  * `%^{Name}T`: Prompt for current date and time for given `Name` (visible in calendar title) (Example: `<2021-06-10 Thu 12:30>`)
   * `%u`: Prints current date in inactive format (Example: `[2021-06-10 Thu]`)
+  * `%^u`: Prompt for current date in inactive format (Example: `[2021-06-10 Thu]`)
+  * `%^{Name}u`: Prompt for current date in inactive format for given `Name` (visible in calendar title) (Example: `[2021-06-10 Thu]`)
   * `%U`: Prints current date and time in inactive format (Example: `[2021-06-10 Thu 12:30]`)
+  * `%^U`: Prompt for current date and time in inactive format (Example: `[2021-06-10 Thu 12:30]`)
+  * `%^{Name}U`: Prompt for current date and time in inactive format for given `Name` (visible in calendar title) (Example: `[2021-06-10 Thu 12:30]`)
   * `%a`: File and line number from where capture was initiated (Example: `[[file:/home/user/projects/myfile.txt +2]]`)
   * `%<FORMAT>`: Insert current date/time formatted according to [lua date](https://www.lua.org/pil/22.1.html) format (Example: `%<%Y-%m-%d %A>` produces '2021-07-02 Friday')
   * `%x`: Insert content of the clipboard via the "+" register (see :help clipboard)
@@ -1676,12 +1684,9 @@ More optimized version would be to create a lua file that has only necessary plu
 -- ~/.config/nvim/lua/partials/org_cron.lua
 
 -- If you are using lazy.vim do this:
-local treesitter = vim.fn.stdpath('data') .. '/lazy/nvim-treesitter'
 local orgmode = vim.fn.stdpath('data') .. '/lazy/orgmode'
 vim.opt.runtimepath:append(orgmode)
-vim.opt.runtimepath:append(treesitter)
 -- If you are using Packer or any other package manager that uses built-in package manager, do this:
-vim.cmd('packadd nvim-treesitter')
 vim.cmd('packadd orgmode')
 
 -- Run the orgmode cron
