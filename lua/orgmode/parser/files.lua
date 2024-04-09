@@ -17,10 +17,10 @@ local Files = {
 
 function Files.new()
   Files.load()
-  vim.notify(
-    '[orgmode] "orgmode.parser.files" is deprecated. Use "orgmode.api" instead (see :h OrgApi.load)',
-    vim.log.levels.WARN
-  )
+  -- vim.notify(
+  --   '[orgmode] "orgmode.parser.files" is deprecated. Use "orgmode.api" instead (see :h OrgApi.load)',
+  --   vim.log.levels.WARN
+  -- )
   return Files
 end
 
