@@ -6,11 +6,18 @@ local query_cache = {}
 function M.restart_highlights(bufnr)
   bufnr = bufnr or 0
   vim.treesitter.stop(bufnr)
-  vim.treesitter.start(bufnr)
+  vim.treesitter.start(bufnr, 'org')
 end
 
 function M.parse_current_file()
   return vim.treesitter.get_parser(0, 'org', {}):parse()
+end
+
+---@param opts? vim.treesitter.get_node.Opts
+function M.get_node(opts)
+  opts = opts or {}
+  opts.lang = opts.lang or 'org'
+  return vim.treesitter.get_node(opts)
 end
 
 ---@param cursor? table
@@ -18,10 +25,10 @@ end
 function M.get_node_at_cursor(cursor)
   M.parse_current_file()
   if not cursor then
-    return vim.treesitter.get_node()
+    return M.get_node()
   end
 
-  return vim.treesitter.get_node({
+  return M.get_node({
     bufnr = 0,
     pos = { cursor[1] - 1, cursor[2] },
   })
@@ -112,6 +119,17 @@ function M.node_to_lsp_range(node)
   rtn.start = { line = start_line, character = start_col }
   rtn['end'] = { line = end_line, character = end_col }
   return rtn
+end
+
+---Return the range of the given node, but override the start column to be 0.
+---This is needed when we want to parse the lines manually to ensure that
+---we parse from the start of the line
+---@param node TSNode
+---@return number[]
+function M.range_with_zero_start_col(node)
+  local range = { node:range() }
+  range[2] = 0
+  return range
 end
 
 -- Memoizes a function based on the buffer tick of the provided bufnr.

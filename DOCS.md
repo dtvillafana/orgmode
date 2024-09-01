@@ -847,12 +847,41 @@ require('orgmode').setup({
       org_agenda = false,
       org_capture = 'gC'
     },
-    agenda = {
-      org_agenda_later = false
+  }
+})
+```
+
+To change a key mapping's `lhs` but not its `desc`, provide a string or a table:
+
+```lua
+require('orgmode').setup({
+  org_agenda_files = {'~/Dropbox/org/*', '~/my-orgs/**/*'},
+  org_default_notes_file = '~/Dropbox/org/refile.org',
+  mappings = {
+    global = {
+      -- providing a string
+      org_agenda = '<D-a>',
+      -- providing a table
+      org_capture = { '<D-c>' }
+    },
+  }
+})
+
+To change a key mapping's `lhs` and its `desc`, provide a table:
+
+```lua
+require('orgmode').setup({
+  org_agenda_files = {'~/Dropbox/org/*', '~/my-orgs/**/*'},
+  org_default_notes_file = '~/Dropbox/org/refile.org',
+  mappings = {
+    global = {
+       org_capture = { '<D-c>', desc = 'Open Capture Prompt' }
     }
   }
 })
 ```
+
+(The `desc` value is displayed in tools like WhichKey.)
 
 You can find the configuration file that holds all default mappings [here](./lua/orgmode/config/mappings/init.lua)
 
@@ -1708,7 +1737,9 @@ The following highlight groups are used:
 - `@org.headline.level7`: Headline at level 7 - linked to `Special`
 - `@org.headline.level8`: Headline at level 8 - linked to `String`
 - `@org.priority.highest`: Highest priority marker - linked to `@comment.error`
+- `@org.priority.high`: High priority marker - Not linked to anything, defaults to normal text
 - `@org.priority.default`: Default priority marker - Not linked to anything, defaults to normal text
+- `@org.priority.low`: Lowest priority marker - Not linked to anything, defaults to normal text
 - `@org.priority.lowest`: Lowest priority marker - Not linked to anything, defaults to normal text
 - `@org.timestamp.active`: An active timestamp - linked to `@keyword`
 - `@org.timestamp.inactive`: An inactive timestamp - linked to `@comment`

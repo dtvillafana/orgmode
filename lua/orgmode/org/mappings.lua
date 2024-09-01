@@ -20,6 +20,7 @@ local ListItem = require('orgmode.files.elements.listitem')
 ---@field capture OrgCapture
 ---@field agenda OrgAgenda
 ---@field files OrgFiles
+---@field links OrgLinks
 local OrgMappings = {}
 
 ---@param data table
@@ -29,6 +30,7 @@ function OrgMappings:new(data)
   opts.capture = data.capture
   opts.agenda = data.agenda
   opts.files = data.files
+  opts.links = data.links
   setmetatable(opts, self)
   self.__index = self
   return opts
@@ -320,7 +322,8 @@ end
 function OrgMappings:set_priority(direction)
   local headline = self.files:get_closest_headline()
   local current_priority = headline:get_priority()
-  local priority_state = PriorityState:new(current_priority)
+  local prio_range = config:get_priority_range()
+  local priority_state = PriorityState:new(current_priority, prio_range)
 
   local new_priority = direction
   if direction == 'up' then
@@ -589,6 +592,11 @@ function OrgMappings:org_return()
     rhs = vim.api.nvim_eval(rhs)
   end
 
+  -- If the rhs is empty, assume that callback already handled the action
+  if old_mapping.callback and not rhs then
+    return
+  end
+
   return vim.api.nvim_feedkeys(rhs, 'n', true)
 end
 
@@ -698,11 +706,6 @@ function OrgMappings:meta_return(suffix)
     end
 
     if #text_edits > 0 then
-      -- Fix sorting for same position edits
-      -- See: https://github.com/neovim/neovim/commit/2ce4a4d91e4abee0aab8b98c47eea9fbd4849ba6
-      if vim.fn.has('nvim-0.11') > 0 then
-        text_edits = utils.reverse(text_edits)
-      end
       vim.lsp.util.apply_text_edits(text_edits, vim.api.nvim_get_current_buf(), constants.default_offset_encoding)
 
       vim.fn.cursor(end_row + 1 + (add_empty_line and 1 or 0), 1) -- +1 for next line

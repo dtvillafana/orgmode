@@ -5,8 +5,6 @@ on:
     branches:
       - master
   pull_request:
-    branches:
-      - master
 
 env:
   CI: true
@@ -27,9 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - v0.9.4
           - v0.9.5
           - v0.10.0
+          - v0.10.1
           - nightly
     runs-on: ubuntu-latest
     steps:
