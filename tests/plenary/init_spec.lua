@@ -1,4 +1,3 @@
-local helpers = require('tests.plenary.helpers')
 local orgmode = require('orgmode')
 
 describe('Init', function()
@@ -10,6 +9,7 @@ describe('Init', function()
   local todo_archive_file = vim.fn.getcwd() .. '/tests/plenary/fixtures/todo.org_archive'
   local refile_file = vim.fn.getcwd() .. '/tests/plenary/fixtures/refile.org'
   local txt_file = vim.fn.getcwd() .. '/tests/plenary/fixtures/text_notes.txt'
+
   it('should load and parse files from folder', function()
     assert.is.Nil(rawget(org, 'files'))
     assert.is.Nil(rawget(org, 'agenda'))
@@ -36,7 +36,7 @@ describe('Init', function()
     assert.are.same({ 'NESTED', 'OFFICE', 'PRIVATE', 'PROJECT', 'WORK' }, org.files:get_tags())
   end)
 
-  it('should append files to paths', function()
+  it('should load file and persist to files if it belongs to path', function()
     local fname = vim.fn.resolve(vim.fn.tempname() .. '.org')
     vim.fn.writefile({ '* Appended' }, fname)
 
@@ -44,13 +44,42 @@ describe('Init', function()
     assert.are.same({}, org.files:find_headlines_by_title('Appended'))
     assert.are.same({ vim.fn.getcwd() .. '/tests/plenary/fixtures/*' }, org.files.paths)
 
-    org.files:add_to_paths_sync(fname)
-    assert.is.Not.Nil(org.files.files[fname])
-    assert.are.same('Appended', org.files:find_headlines_by_title('Appended')[1]:get_title())
-    assert.are.same({ vim.fn.getcwd() .. '/tests/plenary/fixtures/*', fname }, org.files.paths)
+    -- Not added because it does not belong to defined path
+    org.files:load_file_sync(fname, { persist = true })
+    assert.is.Nil(org.files.files[fname])
 
-    org.files:add_to_paths_sync(todo_file)
-    -- Existing file in path not appended to paths
-    assert.are.same({ vim.fn.getcwd() .. '/tests/plenary/fixtures/*', fname }, org.files.paths)
+    org.files.all_files[todo_file] = nil
+    org.files.files[todo_file] = nil
+
+    org.files:load_file_sync(todo_file)
+
+    -- Not added because persist was not provided
+    assert.is.Nil(org.files.files[todo_file])
+    assert.is.Not.Nil(org.files.all_files[todo_file])
+
+    org.files.all_files[todo_file] = nil
+    org.files.files[todo_file] = nil
+
+    org.files:load_file_sync(todo_file, { persist = true })
+    assert.is.Not.Nil(org.files.files[todo_file])
+  end)
+
+  it('should load a file as org file if it has correct filetype', function()
+    local fname = vim.fn.resolve(vim.fn.tempname() .. '.txt')
+
+    -- Behaves as text file
+    vim.fn.writefile({ '* TODO Test' }, fname)
+    vim.cmd('edit ' .. fname)
+    assert.are.same('text', vim.api.nvim_get_option_value('filetype', { buf = vim.api.nvim_get_current_buf() }))
+    vim.cmd('norm >>')
+    assert.are.same({ '        * TODO Test' }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
+    vim.cmd('bw!')
+
+    -- Behaves as org file
+    vim.fn.writefile({ '* TODO Test' }, fname)
+    vim.cmd('edit ' .. fname)
+    vim.cmd('set filetype=org')
+    vim.cmd('norm >>')
+    assert.are.same({ '** TODO Test' }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
   end)
 end)

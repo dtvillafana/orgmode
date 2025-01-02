@@ -226,6 +226,28 @@ function Headline:get_category()
   return self.file:get_category()
 end
 
+memoize('get_outline_path')
+--- @return string
+function Headline:get_outline_path()
+  local inner_to_outer_parent_headlines = {}
+  local parent_section = self:node():parent():parent()
+
+  while parent_section do
+    local headline_node = parent_section:field('headline')[1]
+    if headline_node then
+      local headline = Headline:new(headline_node, self.file)
+      local headline_title = headline:get_title()
+      table.insert(inner_to_outer_parent_headlines, headline_title)
+    end
+    parent_section = parent_section:parent()
+  end
+
+  -- reverse headline order
+  local outer_to_inner_parent_headlines = utils.reverse(inner_to_outer_parent_headlines)
+  local outline_path = table.concat(outer_to_inner_parent_headlines, '/')
+  return outline_path
+end
+
 ---@param tags string
 function Headline:set_tags(tags)
   ---@type TSNode
@@ -266,9 +288,9 @@ function Headline:set_tags(tags)
 end
 
 function Headline:align_tags()
-  local current_text, tags_node = self:tags_to_string()
-  if tags_node then
-    self:set_tags(current_text)
+  local own_tags, node = self:get_own_tags()
+  if node then
+    self:set_tags(utils.tags_to_string(own_tags))
   end
 end
 
@@ -534,9 +556,10 @@ function Headline:get_tags()
 
   local all_tags = utils.concat({}, file_tags)
   utils.concat(all_tags, utils.reverse(parent_tags), true)
+  all_tags = config:exclude_tags(all_tags)
   utils.concat(all_tags, tags, true)
 
-  return config:exclude_tags(all_tags), own_tags_node
+  return all_tags, own_tags_node
 end
 
 ---@return OrgHeadline | nil

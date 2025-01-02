@@ -30,11 +30,10 @@ function Config:__index(key)
 end
 
 function Config:install_grammar()
-  local ok = pcall(vim.treesitter.language.add, 'org')
-  if ok then
-    return
+  local ok, result, err = pcall(vim.treesitter.language.add, 'org')
+  if not ok or (not result and err ~= nil) then
+    require('orgmode.utils.treesitter.install').run()
   end
-  require('orgmode.utils.treesitter.install').run()
 end
 
 ---@param url? string
@@ -345,7 +344,11 @@ function Config:get_priorities()
     [self.opts.org_priority_highest] = { type = 'highest', hl_group = '@org.priority.highest' },
   }
 
-  local current_prio = PriorityState:new(self.opts.org_priority_highest, self:get_priority_range())
+  local current_prio = PriorityState:new(
+    self.opts.org_priority_highest,
+    self:get_priority_range(),
+    self.org_priority_start_cycle_with_default
+  )
   while current_prio:as_num() < current_prio:default_as_num() do
     current_prio:decrease()
     priorities[current_prio.priority] = { type = 'high', hl_group = '@org.priority.high' }

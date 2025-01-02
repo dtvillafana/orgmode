@@ -28,7 +28,7 @@ jobs:
           - v0.9.5
           - v0.10.0
           - v0.10.1
-          - nightly
+          - v0.10.2
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -8,6 +8,9 @@ local Listitem = require('orgmode.files.elements.listitem')
 ---@class OrgFilesOpts
 ---@field paths string | string[]
 
+---@class OrgLoadFileOpts
+---@field persist boolean Persist the file in the list of loaded files if it belongs to path
+
 ---@class OrgFiles
 ---@field paths string[]
 ---@field files table<string, OrgFile> table with files that are part of paths
@@ -39,42 +42,27 @@ function OrgFiles:load(force)
   end
 
   self.load_state = 'loading'
-  local actions = vim.tbl_map(function(filename)
+  return Promise.map(function(filename)
     return self:load_file(filename):next(function(orgfile)
       if orgfile then
         self.files[orgfile.filename] = orgfile
       end
       return orgfile
     end)
-  end, self:_files(true))
-
-  return Promise.all(actions):next(function()
+  end, self:_files(true), 50):next(function()
     self.load_state = 'loaded'
     return self
   end)
 end
 
+---@deprecated Use `load_file` with `persist` option instead
 ---@param filename string
 ---@return OrgPromise<OrgFile | false>
 function OrgFiles:add_to_paths(filename)
-  filename = vim.fn.resolve(vim.fn.fnamemodify(filename, ':p'))
-
-  if self.files[filename] then
-    return self.files[filename]:reload()
-  end
-
-  return self:load_file(filename):next(function(orgfile)
-    if orgfile then
-      self.files[filename] = orgfile
-      local all_paths = self:_files()
-      if not vim.tbl_contains(all_paths, filename) then
-        table.insert(self.paths, filename)
-      end
-    end
-    return orgfile
-  end)
+  return self:load_file(filename, { persist = true })
 end
 
+---@deprecated Use `load_file_sync` with `persist` option instead
 ---@param filename string
 ---@param timeout? number
 ---@return OrgFile | false
@@ -155,25 +143,44 @@ function OrgFiles:filenames()
   end, self:all())
 end
 
+---@param filename string
+---@param opts? OrgLoadFileOpts
 ---@return OrgPromise<OrgFile | false>
-function OrgFiles:load_file(filename)
+function OrgFiles:load_file(filename, opts)
+  opts = opts or {}
   filename = vim.fn.resolve(vim.fn.fnamemodify(filename, ':p'))
+
+  local persist_if_required = function(file)
+    ---@cast file OrgFile
+    if self.files[filename] or not opts.persist then
+      return
+    end
+    local all_paths = self:_files()
+    if vim.tbl_contains(all_paths, filename) then
+      self.files[filename] = file
+    end
+  end
+
   local file = self.all_files[filename]
   if file then
+    persist_if_required(file)
     return file:reload()
   end
 
   return OrgFile.load(filename):next(function(orgfile)
     if orgfile then
+      persist_if_required(orgfile)
       self.all_files[filename] = orgfile
     end
     return orgfile
   end)
 end
 
+---@param filename string
+---@param opts? OrgLoadFileOpts
 ---@return OrgFile | false
-function OrgFiles:load_file_sync(filename, timeout)
-  return self:load_file(filename):wait(timeout)
+function OrgFiles:load_file_sync(filename, opts, timeout)
+  return self:load_file(filename, opts):wait(timeout)
 end
 
 ---@param filename string
@@ -199,7 +206,15 @@ function OrgFiles:get_closest_headline(cursor)
 end
 
 function OrgFiles:get_closest_listitem()
-  local node = ts_utils.closest_node(ts_utils.get_node_at_cursor(), 'listitem')
+  local get_listitem_node = function()
+    local node_at_cursor = ts_utils.get_node_at_cursor()
+    if node_at_cursor and node_at_cursor:type() == 'list' then
+      return node_at_cursor:named_child(0)
+    end
+    return ts_utils.closest_node(node_at_cursor, 'listitem')
+  end
+
+  local node = get_listitem_node()
   if node then
     return Listitem:new(node, self:get_current_file())
   end
