@@ -17,9 +17,9 @@ describe('OrgFile', function()
 
       assert.are.same(filename, file.filename)
       assert.are.same({ '* Headline 1' }, file.lines)
-      assert.are.same('* Headline 1', file.content)
-      local stat = vim.loop.fs_stat(filename) or {}
+      local stat = vim.uv.fs_stat(filename) or {}
       assert.are.same(stat.mtime.nsec, file.metadata.mtime)
+      assert.are.same(stat.mtime.sec, file.metadata.mtime_sec)
       assert.are.same(0, file.metadata.changedtick)
     end)
 
@@ -36,13 +36,26 @@ describe('OrgFile', function()
 
       assert.are.same(filename, file.filename)
       assert.are.same({ '* Headline 2' }, file.lines)
-      assert.are.same('* Headline 2', file.content)
-      local stat = vim.loop.fs_stat(filename) or {}
+      local stat = vim.uv.fs_stat(filename) or {}
       assert.are.same(stat.mtime.nsec, file.metadata.mtime)
+      assert.are.same(stat.mtime.sec, file.metadata.mtime_sec)
       assert.are.same(0, file.metadata.changedtick)
       vim.cmd('write!')
       file:reload_sync()
       assert.are.same(4, file.metadata.changedtick)
+    end)
+
+    it('should load files with special characters in filename from buffer', function()
+      local special_filename = vim.fn.tempname() .. '[test].org'
+      local file = load_file_sync({ '* Headline with bracket filename' }, special_filename)
+      vim.cmd('edit ' .. vim.fn.fnameescape(file.filename))
+
+      -- Test that OrgFile.load can find the buffer correctly
+      local loaded_file = OrgFile.load(special_filename):wait()
+      assert.are.same(special_filename, loaded_file.filename)
+      assert.are.same({ '* Headline with bracket filename' }, loaded_file.lines)
+
+      vim.cmd('bdelete')
     end)
   end)
 
@@ -57,7 +70,6 @@ describe('OrgFile', function()
       file = file:reload_sync()
       assert.are.not_same(old_mtime, file.metadata.mtime)
       assert.are.same({ '* Headline 3 edited' }, file.lines)
-      assert.are.same('* Headline 3 edited', file.content)
     end)
 
     it('should reload a buffer if its modified', function()
@@ -73,7 +85,6 @@ describe('OrgFile', function()
       assert.are.same(old_mtime, file.metadata.mtime)
       assert.are.not_same(old_changedtick, file.metadata.changedtick)
       assert.are.same({ '* Headline 3', '* Headline 4' }, file.lines)
-      assert.are.same('* Headline 3\n* Headline 4', file.content)
     end)
   end)
 
@@ -540,16 +551,6 @@ describe('OrgFile', function()
       assert.are.same(-1, file:bufnr())
     end)
 
-    it('should return buffer number if file is loaded', function()
-      local file = load_file_sync({
-        '* Headline 1 :TAG:',
-        '  The content',
-        '  Multi line',
-      })
-      vim.cmd('edit ' .. file.filename)
-      assert.is.True(file:bufnr() > 0)
-    end)
-
     it('should return -1 if file is loaded in buffer but buffer is not loaded', function()
       local file = load_file_sync({
         '* Headline 1 :TAG:',
@@ -561,6 +562,49 @@ describe('OrgFile', function()
       vim.cmd('bdelete')
       assert.are.same(-1, file:bufnr())
       assert.is.True(vim.fn.bufnr(file.filename) > 0)
+    end)
+
+    it('should return buffer number if file is loaded', function()
+      local file = load_file_sync({
+        '* Headline 1 :TAG:',
+        '  The content',
+        '  Multi line',
+      })
+      vim.cmd('edit ' .. file.filename)
+      assert.is.True(file:bufnr() > 0)
+    end)
+
+    it('should work with filenames containing special characters', function()
+      -- Test various special characters that have regex meaning
+      local test_cases = {
+        '[test].org',
+        '(test).org',
+        'test[1].org',
+        'file.with.dots.org',
+        'file+plus.org',
+        'file*star.org',
+        'file?question.org',
+        'file$dollar.org',
+        'file^caret.org',
+      }
+
+      for _, special_filename in ipairs(test_cases) do
+        local full_filename = vim.fn.tempname() .. special_filename
+        local file = load_file_sync({
+          '* Headline with special filename',
+          '  Content in special file',
+        }, full_filename)
+
+        -- Test that loading the buffer works
+        vim.cmd('edit ' .. vim.fn.fnameescape(file.filename))
+        assert.is.True(file:bufnr() > 0, 'Failed for filename: ' .. special_filename)
+
+        -- Test that get_valid_bufnr() works
+        local bufnr = file:get_valid_bufnr()
+        assert.is.True(bufnr > 0, 'get_valid_bufnr failed for filename: ' .. special_filename)
+
+        vim.cmd('bdelete')
+      end
     end)
   end)
 
@@ -828,6 +872,70 @@ describe('OrgFile', function()
         '* TODO Headline 1',
       })
       assert.are.same('somevalue', file:get_directive('somedirective'))
+    end)
+  end)
+
+  describe('get_todos', function()
+    local has_correct_type = function(todos)
+      assert.are.same('TODO', todos.todo_keywords[1].type)
+      assert.are.same('TODO', todos.todo_keywords[2].type)
+      assert.are.same('DONE', todos.todo_keywords[3].type)
+      assert.are.same('DONE', todos.todo_keywords[4].type)
+    end
+
+    local has_correct_values = function(todos)
+      assert.are.same('OPEN', todos.todo_keywords[1].value)
+      assert.are.same('DOING', todos.todo_keywords[2].value)
+      assert.are.same('FINISHED', todos.todo_keywords[3].value)
+      assert.are.same('ABORTED', todos.todo_keywords[4].value)
+    end
+    it('should get todo keywords from config by default', function()
+      config:extend({
+        org_todo_keywords = { 'TODO', 'DOING', '|', 'DONE', 'CANCELED' },
+      })
+      local file = load_file_sync({
+        '* TODO Headline 1',
+      })
+      local todos = file:get_todo_keywords()
+      assert.are.same({ { 'TODO', 'DOING', '|', 'DONE', 'CANCELED' } }, todos.org_todo_keywords)
+    end)
+
+    it('should parse custom todo keywords from file directive', function()
+      local file = load_file_sync({
+        '#+TODO: OPEN DOING | FINISHED ABORTED',
+        '* OPEN Headline 1',
+      })
+      local todos = file:get_todo_keywords()
+      has_correct_type(todos)
+      has_correct_values(todos)
+      assert.are.equal(1, #todos.org_todo_keywords)
+      assert.are.same({ 'OPEN', 'DOING', '|', 'FINISHED', 'ABORTED' }, todos.org_todo_keywords[1])
+    end)
+
+    it('should handle todo keywords with shortcut keys', function()
+      local file = load_file_sync({
+        '#+TODO: OPEN(o) DOING(d) | FINISHED(f) ABORTED(a)',
+        '* OPEN Headline 1',
+      })
+      local todos = file:get_todo_keywords()
+      has_correct_type(todos)
+      has_correct_values(todos)
+      assert.are.equal(1, #todos.org_todo_keywords)
+      assert.are.same({ 'OPEN(o)', 'DOING(d)', '|', 'FINISHED(f)', 'ABORTED(a)' }, todos.org_todo_keywords[1])
+    end)
+    it('should handle multiple todo keyword sequences from file directives', function()
+      local file = load_file_sync({
+        '#+TODO: OPEN DOING | FINISHED ABORTED',
+        '#+TODO: MEETING PHONE | COMPLETED',
+        '* OPEN Headline 1',
+      })
+      local todos = file:get_todo_keywords()
+      has_correct_type(todos)
+      has_correct_values(todos)
+      assert.are.same({
+        { 'OPEN', 'DOING', '|', 'FINISHED', 'ABORTED' },
+        { 'MEETING', 'PHONE', '|', 'COMPLETED' },
+      }, todos.org_todo_keywords)
     end)
   end)
 end)

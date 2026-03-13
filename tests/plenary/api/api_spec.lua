@@ -103,11 +103,27 @@ describe('Api', function()
     assert.are.same('Second level', current_file.headlines[2].title)
     assert.are.same({ 'WORK', 'OFFICE', 'NESTEDTAG' }, current_file.headlines[2].all_tags)
 
-    current_file.headlines[2]:set_tags({ 'PERSONAL', 'HEALTH' }):wait()
+    current_file.headlines[2]:set_tags({ 'PERSONAL', 'HEALTH', 'TAG1 TAG2', 'TAG3-TAG4-TAG5' }):wait()
 
-    assert.are.same({ 'PERSONAL', 'HEALTH' }, cur_file().headlines[2].tags)
-    assert.are.same({ 'WORK', 'OFFICE', 'PERSONAL', 'HEALTH' }, cur_file().headlines[2].all_tags)
-    assert.is.True(vim.fn.getline(5):match(':PERSONAL:HEALTH:$') ~= nil)
+    assert.are.same({ 'PERSONAL', 'HEALTH', 'TAG1', 'TAG2', 'TAG3', 'TAG4', 'TAG5' }, cur_file().headlines[2].tags)
+    assert.are.same(
+      { 'WORK', 'OFFICE', 'PERSONAL', 'HEALTH', 'TAG1', 'TAG2', 'TAG3', 'TAG4', 'TAG5' },
+      cur_file().headlines[2].all_tags
+    )
+    assert.is.True(vim.fn.getline(5):match(':PERSONAL:HEALTH:TAG1:TAG2:TAG3:TAG4:TAG5:$') ~= nil)
+  end)
+
+  it('should handle edge cases in tag input', function()
+    helpers.create_file({ '* TODO Test orgmode tags :TAG1:' })
+
+    assert.is.True(#api.load() > 1)
+    local current_file = cur_file()
+    assert.are.same({ 'TAG1' }, current_file.headlines[1].all_tags)
+
+    current_file.headlines[1]:set_tags({ ':  -tag1- : tag2:::tag3    tag_4 : @tag5 :' }):wait()
+
+    assert.are.same({ 'tag1', 'tag2', 'tag3', 'tag_4', '@tag5' }, cur_file().headlines[1].all_tags)
+    assert.is.True(vim.fn.getline(1):match(':tag1:tag2:tag3:tag_4:@tag5:') ~= nil)
   end)
 
   it('should cycle upwards through priorities, starting with default', function()
@@ -442,10 +458,12 @@ describe('Api', function()
           '* TODO Some task',
         })
 
-        api.refile({
-          source = api.current().headlines[2],
-          destination = api.load(destination_file.filename),
-        })
+        api
+          .refile({
+            source = api.current().headlines[2],
+            destination = api.load(destination_file.filename),
+          })
+          :wait()
 
         assert.are.same(vim.api.nvim_buf_get_name(0), source_file.filename)
         vim.cmd('e' .. destination_file.filename)
@@ -480,10 +498,12 @@ describe('Api', function()
 
         assert.are.same(vim.api.nvim_buf_get_name(0), source_file.filename)
 
-        api.refile({
-          source = api.current().headlines[2],
-          destination = api.load(destination_file.filename).headlines[2],
-        })
+        api
+          .refile({
+            source = api.current().headlines[2],
+            destination = api.load(destination_file.filename).headlines[2],
+          })
+          :wait()
 
         vim.cmd('e' .. destination_file.filename)
 
@@ -517,10 +537,12 @@ describe('Api', function()
           '  DEADLINE: <2021-07-21 Wed 22:02>',
         })
 
-        api.refile({
-          source = api.current().headlines[1],
-          destination = api.load(destination_file.filename),
-        })
+        api
+          .refile({
+            source = api.current().headlines[1],
+            destination = api.load(destination_file.filename),
+          })
+          :wait()
 
         assert.are.Not.same(vim.api.nvim_buf_get_name(0), source_file)
 
@@ -554,10 +576,12 @@ describe('Api', function()
           '  DEADLINE: <2021-07-21 Wed 22:02>',
         })
 
-        api.refile({
-          source = api.current().headlines[1],
-          destination = api.load(destination_file.filename).headlines[2],
-        })
+        api
+          .refile({
+            source = api.current().headlines[1],
+            destination = api.load(destination_file.filename).headlines[2],
+          })
+          :wait()
 
         assert.are.Not.same(vim.api.nvim_buf_get_name(0), source_file)
 

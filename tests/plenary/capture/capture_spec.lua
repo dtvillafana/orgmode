@@ -1,6 +1,7 @@
 local Capture = require('orgmode.capture')
 local Templates = require('orgmode.capture.templates')
 local Template = require('orgmode.capture.template')
+local CaptureWindow = require('orgmode.capture.window')
 local helpers = require('tests.plenary.helpers')
 local org = require('orgmode')
 
@@ -140,11 +141,13 @@ describe('Refile', function()
     local source_headline = capture_file:get_headlines()[2]
 
     ---@diagnostic disable-next-line: invisible
-    org.capture:_refile_from_org_file({
-      source_headline = source_headline,
-      destination_file = destination_file,
-    })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    org.capture
+      :_refile_from_org_file({
+        source_headline = source_headline,
+        destination_file = destination_file,
+      })
+      :wait()
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '* foo',
     }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
@@ -169,11 +172,13 @@ describe('Refile', function()
     local item = capture_file:get_headlines()[2]
 
     ---@diagnostic disable-next-line: invisible
-    org.capture:_refile_from_org_file({
-      destination_file = destination_file,
-      source_headline = item,
-    })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    org.capture
+      :_refile_from_org_file({
+        destination_file = destination_file,
+        source_headline = item,
+      })
+      :wait()
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '* foobar',
       '* baz',
@@ -193,16 +198,18 @@ describe('Refile', function()
     })
 
     local capture_lines = { '** baz' }
-    local capture_file = helpers.create_file_instance(capture_lines)
+    local capture_file = helpers.create_file(capture_lines)
     local item = capture_file:get_headlines()[1]
 
     ---@diagnostic disable-next-line: invisible
-    org.capture:_refile_from_org_file({
-      destination_file = destination_file,
-      source_headline = item,
-      destination_headline = destination_file:get_headlines()[1],
-    })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    org.capture
+      :_refile_from_org_file({
+        destination_file = destination_file,
+        source_headline = item,
+        destination_headline = destination_file:get_headlines()[1],
+      })
+      :wait()
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '* foobar',
       '** baz',
@@ -219,24 +226,27 @@ describe('Capture', function()
     local destination_file = helpers.create_file({})
 
     local capture_lines = { '* foo' }
-    local capture_file = helpers.create_file_instance(capture_lines)
+    local capture_file = helpers.create_file(capture_lines)
     local item = capture_file:get_headlines()[1]
+    local template = Template:new({
+      properties = {
+        empty_lines = {
+          before = 2,
+          after = 1,
+        },
+      },
+    })
+    local capture_window = CaptureWindow:new({ template = template })
 
     ---@diagnostic disable-next-line: invisible
     org.capture:_refile_from_capture_buffer({
       destination_file = destination_file,
       source_file = capture_file,
       source_headline = item,
-      template = Template:new({
-        properties = {
-          empty_lines = {
-            before = 2,
-            after = 1,
-          },
-        },
-      }),
+      template = template,
+      capture_window = capture_window,
     })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '',
       '',
@@ -256,6 +266,16 @@ describe('Capture', function()
 
     local capture_lines = { '** baz' }
     local capture_file = helpers.create_file(capture_lines)
+
+    local template = Template:new({
+      properties = {
+        empty_lines = {
+          before = 2,
+          after = 1,
+        },
+      },
+    })
+    local capture_window = CaptureWindow:new({ template = template })
     assert(capture_file)
     local item = capture_file:get_headlines()[1]
 
@@ -264,16 +284,10 @@ describe('Capture', function()
       destination_file = destination_file,
       source_file = capture_file,
       source_headline = item,
-      template = Template:new({
-        properties = {
-          empty_lines = {
-            before = 2,
-            after = 1,
-          },
-        },
-      }),
+      template = template,
+      capture_window = capture_window,
     })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '* foobar',
       '',
@@ -296,8 +310,17 @@ describe('Capture', function()
     })
 
     local capture_lines = { '** baz' }
-    local capture_file = helpers.create_file_instance(capture_lines)
+    local capture_file = helpers.create_file(capture_lines)
     local item = capture_file:get_headlines()[1]
+    local template = Template:new({
+      properties = {
+        empty_lines = {
+          before = 2,
+          after = 1,
+        },
+      },
+    })
+    local capture_window = CaptureWindow:new({ template = template })
 
     ---@diagnostic disable-next-line: invisible
     org.capture:_refile_from_capture_buffer({
@@ -305,16 +328,10 @@ describe('Capture', function()
       source_file = capture_file,
       source_headline = item,
       destination_headline = destination_file:get_headlines()[1],
-      template = Template:new({
-        properties = {
-          empty_lines = {
-            before = 2,
-            after = 1,
-          },
-        },
-      }),
+      template = template,
+      capture_window = capture_window,
     })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '* foobar',
       '',
@@ -338,19 +355,22 @@ describe('Capture', function()
     })
 
     local capture_lines = { '** baz' }
-    local capture_file = helpers.create_file_instance(capture_lines)
+    local capture_file = helpers.create_file(capture_lines)
     local item = capture_file:get_headlines()[1]
+    local template = Template:new({
+      regexp = 'appendhere',
+    })
+    local capture_window = CaptureWindow:new({ template = template })
 
     ---@diagnostic disable-next-line: invisible
     org.capture:_refile_from_capture_buffer({
       destination_file = destination_file,
       source_file = capture_file,
       source_headline = item,
-      template = Template:new({
-        regexp = 'appendhere',
-      }),
+      template = template,
+      capture_window = capture_window,
     })
-    vim.cmd('edit' .. vim.fn.fnameescape(destination_file.filename))
+    vim.cmd('edit ' .. vim.fn.fnameescape(destination_file.filename))
     assert.are.same({
       '#+title foo',
       'appendhere',

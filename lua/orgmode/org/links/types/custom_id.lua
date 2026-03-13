@@ -42,10 +42,10 @@ function OrgLinkCustomId:follow(link)
   return link_utils.open_file_and_search(opts.file_path, opts.custom_id)
 end
 
----@param link string
+---@param context OrgCompletionContext
 ---@return string[]
-function OrgLinkCustomId:autocomplete(link)
-  local opts = self:_parse(link)
+function OrgLinkCustomId:autocomplete(context)
+  local opts = self:_parse(context.base)
   if not opts then
     return {}
   end
@@ -60,7 +60,7 @@ function OrgLinkCustomId:autocomplete(link)
   local prefix = opts.type == 'internal' and '' or opts.link_url:get_path_with_protocol() .. '::'
 
   return vim.tbl_map(function(headline)
-    local custom_id = headline:get_property('custom_id')
+    local custom_id = headline:get_property('custom_id', false)
     return prefix .. '#' .. custom_id
   end, headlines)
 end

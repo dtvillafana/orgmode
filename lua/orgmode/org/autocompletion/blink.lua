@@ -21,6 +21,7 @@ function Source:get_completions(ctx, callback)
   local results = org.completion:complete({
     line = line,
     base = base,
+    fuzzy = true,
   })
 
   local cb = function(items)
@@ -41,6 +42,9 @@ function Source:get_completions(ctx, callback)
   local triggers = { '#', '+', ':', '*', '/' }
 
   local getInsertTextOffset = function(word)
+    if #word > 1 and word:sub(1, 2) == '#+' then
+      return 0
+    end
     local word_length = #word + 1
     while word_length > 0 do
       local char = word:sub(word_length - 1, word_length - 1)

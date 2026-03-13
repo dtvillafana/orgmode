@@ -24,12 +24,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
         version:
-          - v0.9.5
-          - v0.10.0
-          - v0.10.1
-          - v0.10.2
-    runs-on: ubuntu-latest
+          - v0.11.3
+          - v0.11.4
+          - nightly
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Neovim
@@ -39,4 +42,4 @@ jobs:
           neovim: true
           version: ${{ matrix.version }}
       - name: Run tests
-        run: make test
+        run: make test-ci

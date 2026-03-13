@@ -50,13 +50,12 @@ end
 ---@param opts? table<string, any>
 function MapEntry:new(handler, opts)
   opts = opts or {}
-  vim.validate({
-    handler = { handler, { 'string', 'function' } },
-    modes = { opts.modes, 'table', true },
-    desc = { opts.desc, 'string', true },
-    help_desc = { opts.help_desc, 'string', true },
-    type = { opts.type, 'string', true },
-  })
+  vim.validate('handler', handler, { 'string', 'function' })
+  vim.validate('modes', opts.modes, 'table', true)
+  vim.validate('desc', opts.desc, 'string', true)
+  vim.validate('help_desc', opts.help_desc, 'string', true)
+  vim.validate('type', opts.type, 'string', true)
+
   local data = {}
   data.provided_opts = opts
   data.handler = handler
@@ -94,7 +93,8 @@ function MapEntry:attach(default_mapping, user_mapping, opts)
 
   if type(mapping) ~= 'table' then
     error(
-      'Invalid mapping provided for ' .. tostring(self.handler) .. '. Only string and array of strings can be provided'
+      'Invalid mapping provided for ' .. tostring(self.handler) .. '. Only string and array of strings can be provided',
+      0
     )
   end
 

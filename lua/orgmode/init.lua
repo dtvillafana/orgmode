@@ -1,4 +1,5 @@
 _G.orgmode = _G.orgmode or {}
+_G.Org = _G.Org or {}
 ---@type Org | nil
 local instance = nil
 
@@ -15,8 +16,10 @@ local auto_instance_keys = {
 
 ---@class Org
 ---@field initialized boolean
+---@field setup_called boolean
 ---@field files OrgFiles
 ---@field highlighter OrgHighlighter
+---@field buffers OrgBuffers
 ---@field agenda OrgAgenda
 ---@field capture OrgCapture
 ---@field clock OrgClock
@@ -35,7 +38,9 @@ setmetatable(Org, {
 })
 
 function Org:new()
+  require('orgmode.org.global')(self)
   self.initialized = false
+  self.setup_called = false
   self:setup_autocmds()
   require('orgmode.config'):setup_ts_predicates()
   return self
@@ -45,6 +50,7 @@ function Org:init()
   if self.initialized then
     return
   end
+  self.buffers = require('orgmode.state.buffers').init()
   require('orgmode.events').init()
   self.highlighter = require('orgmode.colors.highlighter'):new()
   require('orgmode.colors.highlights').define_highlights()
@@ -56,20 +62,23 @@ function Org:init()
   self.links = require('orgmode.org.links'):new({ files = self.files })
   self.agenda = require('orgmode.agenda'):new({
     files = self.files,
+    highlighter = self.highlighter,
+    links = self.links,
   })
   self.capture = require('orgmode.capture'):new({
     files = self.files,
   })
+  self.completion = require('orgmode.org.autocompletion'):new({ files = self.files, links = self.links })
   self.org_mappings = require('orgmode.org.mappings'):new({
     capture = self.capture,
     agenda = self.agenda,
     files = self.files,
     links = self.links,
+    completion = self.completion,
   })
   self.clock = require('orgmode.clock'):new({
     files = self.files,
   })
-  self.completion = require('orgmode.org.autocompletion'):new({ files = self.files, links = self.links })
   self.statusline_debounced = require('orgmode.utils').debounce('statusline', function()
     return self.clock:get_statusline()
   end, 300)
@@ -84,6 +93,15 @@ end
 
 function Org:setup_autocmds()
   local org_augroup = vim.api.nvim_create_augroup('orgmode_nvim', { clear = true })
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    pattern = { '*.org', '*.org_archive' },
+    group = org_augroup,
+    callback = function(event)
+      if not vim.bo[event.buf].filetype or vim.bo[event.buf].filetype == '' then
+        vim.bo[event.buf].filetype = 'org'
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd('BufWritePost', {
     pattern = { '*.org', '*.org_archive' },
     group = org_augroup,
@@ -107,21 +125,36 @@ function Org:setup_autocmds()
       end
     end,
   })
+
+  vim.api.nvim_create_autocmd({ 'BufNew' }, {
+    pattern = { '*.org', '*.org_archive' },
+    group = org_augroup,
+    callback = function(event)
+      if self.buffers then
+        self.buffers.add(event.buf)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd('BufWipeout', {
+    pattern = { '*.org', '*.org_archive' },
+    group = org_augroup,
+    callback = function(event)
+      if self.buffers then
+        self.buffers.remove(event.buf)
+      end
+    end,
+  })
 end
 
-function Org.setup_ts_grammar()
-  require('orgmode.utils').echo_info(
-    'calling require("orgmode").setup_ts_grammar() is no longer necessary. Dependency on nvim-treesitter was removed'
-  )
-end
-
----@param opts? OrgDefaultConfig
+---@param opts? OrgConfigOpts
 ---@return Org
 function Org.setup(opts)
   opts = opts or {}
   local config = require('orgmode.config'):extend(opts)
   config:install_grammar()
   instance = Org:new()
+  instance.setup_called = true
   vim.defer_fn(function()
     if config.notifications.enabled and #vim.api.nvim_list_uis() > 0 then
       Org.files:load():next(vim.schedule_wrap(function()
@@ -219,6 +252,13 @@ function Org.destroy()
     instance = nil
     collectgarbage()
   end
+end
+
+function Org.is_setup_called()
+  if not instance then
+    return false
+  end
+  return instance.setup_called
 end
 
 function _G.orgmode.statusline()

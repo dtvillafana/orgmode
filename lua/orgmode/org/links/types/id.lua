@@ -45,7 +45,8 @@ function OrgLinkId:follow(link)
     return true
   end
   local headline = headlines[1]
-  return link_utils.goto_headline(headline)
+  utils.goto_headline(headline)
+  return true
 end
 
 ---@return string[]
@@ -55,7 +56,7 @@ end
 
 ---@private
 ---@param link string
----@return string
+---@return string?
 function OrgLinkId:_parse(link)
   return link:match('^id:(.+)$')
 end

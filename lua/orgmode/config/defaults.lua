@@ -1,8 +1,4 @@
----@class OrgDefaultConfig
----@field org_id_method 'uuid' | 'ts' | 'org'
----@field org_agenda_span 'day' | 'week' | 'month' | 'year' | number
----@field org_log_repeat 'time' | 'note' | false
----@field calendar { round_min_with_hours: boolean, min_big_step: number, min_small_step: number? }
+---@class OrgConfigOpts
 local DefaultConfig = {
   org_agenda_files = '',
   org_default_notes_file = '',
@@ -29,6 +25,24 @@ local DefaultConfig = {
   org_agenda_skip_scheduled_if_done = false,
   org_agenda_skip_deadline_if_done = false,
   org_agenda_text_search_extra_files = {},
+  org_agenda_custom_commands = {},
+  org_agenda_hide_empty_blocks = false,
+  org_agenda_block_separator = '-',
+  org_agenda_sorting_strategy = {
+    agenda = { 'time-up', 'priority-down', 'category-keep' },
+    todo = { 'priority-down', 'category-keep' },
+    tags = { 'priority-down', 'category-keep' },
+  },
+  org_agenda_remove_tags = false,
+  org_agenda_time_grid = {
+    type = { 'daily', 'today', 'require-timed' },
+    times = { 800, 1000, 1200, 1400, 1600, 1800, 2000 },
+    time_separator = '┄┄┄┄┄',
+    time_label = '┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄',
+  },
+  org_agenda_current_time_string = '<- now -----------------------------------------------',
+  org_agenda_use_time_grid = true,
+  org_agenda_show_future_repeats = true,
   org_priority_highest = 'A',
   org_priority_default = 'B',
   org_priority_lowest = 'C',
@@ -50,17 +64,20 @@ local DefaultConfig = {
   org_indent_mode_turns_off_org_adapt_indentation = true,
   org_indent_mode_turns_on_hiding_stars = true,
   org_time_stamp_rounding_minutes = 5,
+  org_cycle_separator_lines = 2,
   org_blank_before_new_entry = {
     heading = true,
     plain_list_item = false,
   },
   org_src_window_setup = 'top 16new',
   org_edit_src_content_indentation = 0,
+  org_edit_src_filetype_map = {},
   org_id_uuid_program = 'uuidgen',
   org_id_ts_format = '%Y%m%d%H%M%S',
   org_id_method = 'uuid',
   org_id_prefix = nil,
   org_id_link_to_org_use_id = false,
+  org_use_property_inheritance = false,
   org_babel_default_header_args = {
     [':tangle'] = 'no',
     [':noweb'] = 'no',
@@ -75,6 +92,9 @@ local DefaultConfig = {
     reminder_time = 10,
     deadline_reminder = true,
     scheduled_reminder = true,
+  },
+  hyperlinks = {
+    sources = {},
   },
   mappings = {
     disable_all = false,
@@ -98,6 +118,7 @@ local DefaultConfig = {
       org_agenda_goto_date = 'J',
       org_agenda_redo = 'r',
       org_agenda_todo = 't',
+      org_agenda_open_at_point = '<prefix>o',
       org_agenda_clock_goto = '<prefix>xj',
       org_agenda_set_effort = '<prefix>xe',
       org_agenda_clock_in = 'I',
@@ -115,6 +136,7 @@ local DefaultConfig = {
       org_agenda_filter = '/',
       org_agenda_refile = '<prefix>r',
       org_agenda_add_note = '<prefix>na',
+      org_agenda_preview = 'K',
       org_agenda_show_help = 'g?',
     },
     capture = {
@@ -184,6 +206,7 @@ local DefaultConfig = {
     edit_src = {
       org_edit_src_abort = '<prefix>k',
       org_edit_src_save = '<prefix>w',
+      org_edit_src_save_exit = [[<prefix>']],
       org_edit_src_show_help = 'g?',
     },
     text_objects = {
@@ -199,7 +222,7 @@ local DefaultConfig = {
   },
   emacs_config = {
     executable_path = 'emacs',
-    config_path = '$HOME/.emacs.d/init.el',
+    config_path = nil,
   },
   ui = {
     folds = {
@@ -207,6 +230,14 @@ local DefaultConfig = {
     },
     menu = {
       handler = nil,
+    },
+    input = {
+      use_vim_ui = false,
+    },
+    agenda = {
+      preview_window = {
+        wrap = false,
+      },
     },
   },
 }

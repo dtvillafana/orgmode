@@ -11,15 +11,18 @@ local config = require('orgmode.config')
 
 ---@alias OrgMenuItem OrgMenuOption | OrgMenuSeparator
 
---- Menu for selecting an action by pressing a key by the user
----@class OrgMenu
+---@class OrgMenuOpts
 ---@field title string Menu title
 ---@field items OrgMenuItem[]? Menu items, may include options and separators
 ---@field prompt string Prompt text used to prompt a keystroke
 ---@field separator OrgMenuSeparator? Default separator
+
+--- Menu for selecting an action by pressing a key by the user
+---@class OrgMenu:OrgMenuOpts
 local Menu = {}
 
----@param data OrgMenu
+---@param data OrgMenuOpts
+---@return OrgMenu
 function Menu:new(data)
   self:_validate_data(data)
 
@@ -36,18 +39,14 @@ end
 
 ---@param option OrgMenuOption
 function Menu:_validate_option(option)
-  vim.validate({
-    label = { option.label, 'string' },
-    key = { option.key, 'string' },
-    action = { option.action, 'function', true },
-  })
+  vim.validate('label', option.label, 'string')
+  vim.validate('key', option.key, 'string')
+  vim.validate('action', option.action, 'function', true)
 end
 
 ---@param items OrgMenuItem[]?
 function Menu:_validate_items(items)
-  vim.validate({
-    items = { items, 'table', true },
-  })
+  vim.validate('items', items, 'table', true)
   if not items then
     return
   end
@@ -65,23 +64,17 @@ end
 
 ---@param separator OrgMenuSeparator?
 function Menu:_validate_separator(separator)
-  vim.validate({
-    separator = { separator, 'table', true },
-  })
+  vim.validate('separator', separator, 'table', true)
   if separator then
-    vim.validate({
-      icon = { separator.icon, 'string', true },
-      length = { separator.length, 'number', true },
-    })
+    vim.validate('icon', separator.icon, 'string', true)
+    vim.validate('length', separator.length, 'number', true)
   end
 end
 
----@param data OrgMenu
+---@param data OrgMenuOpts
 function Menu:_validate_data(data)
-  vim.validate({
-    title = { data.title, 'string' },
-    prompt = { data.prompt, 'string' },
-  })
+  vim.validate('title', data.title, 'string')
+  vim.validate('prompt', data.prompt, 'string')
   self:_validate_items(data.items)
   self:_validate_separator(data.separator)
 end
@@ -92,7 +85,7 @@ function Menu:add_option(option)
   table.insert(self.items, option)
 end
 
----@param separator OrgMenuSeparator
+---@param separator? OrgMenuSeparator
 function Menu:add_separator(separator)
   self:_validate_separator(separator)
   table.insert(self.items, vim.tbl_deep_extend('force', self.separator, separator or {}))
@@ -130,6 +123,21 @@ function Menu._default_menu(data)
     return
   end
   return entry.action()
+end
+
+---@return table<string, OrgMenuOption | OrgMenuSeparator>
+function Menu:get_valid_keys()
+  local valid_keys = {}
+  for _, item in ipairs(self.items) do
+    if item.key then
+      valid_keys[item.key] = item
+    end
+  end
+  return valid_keys
+end
+
+function Menu:get_entry_by_key(key)
+  return self:get_valid_keys()[key]
 end
 
 function Menu:open()

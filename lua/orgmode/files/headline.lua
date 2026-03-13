@@ -8,12 +8,15 @@ local indent = require('orgmode.org.indent')
 local Logbook = require('orgmode.files.elements.logbook')
 local OrgId = require('orgmode.org.id')
 local Memoize = require('orgmode.utils.memoize')
+local EventManager = require('orgmode.events')
+local events = EventManager.event
 
 ---@alias OrgPlanDateTypes 'DEADLINE' | 'SCHEDULED' | 'CLOSED'
 
 ---@class OrgHeadline
 ---@field headline TSNode
 ---@field file OrgFile
+---@field index? number
 local Headline = {}
 
 local memoize = Memoize:new(Headline, function(self)
@@ -66,26 +69,23 @@ end
 memoize('get_priority')
 ---@return string, TSNode | nil
 function Headline:get_priority()
-  local _, todo_node = self:get_todo()
   local item = self:_get_child_node('item')
 
-  local priority_node = item and item:named_child(1)
+  local priority_node = item and item:field('priority')[1]
 
-  if not todo_node then
-    priority_node = item and item:named_child(0)
+  if not priority_node then
+    return '', nil
   end
 
-  if priority_node then
-    local text = self.file:get_node_text(priority_node)
-    local priority = text:match('%[#(%w+)%]')
-    if priority then
-      local priorities = config:get_priorities()
-      if priorities[priority] then
-        return priority, priority_node
-      end
-    end
+  local value = self.file:get_node_text(priority_node)
+  -- Parse only the priority cookie, [#A] -> A
+  local priority = value:sub(3, -2)
+
+  if not config:get_priorities()[priority] then
+    return '', nil
   end
-  return '', nil
+
+  return priority, priority_node
 end
 
 ---@param amount number
@@ -156,6 +156,7 @@ function Headline:clock_in()
     logbook = Logbook.new_from_headline(self)
   end
   logbook:add_clock_in()
+  EventManager.dispatch(events.ClockedIn:new(self))
   return self:refresh()
 end
 
@@ -163,6 +164,7 @@ function Headline:clock_out()
   local logbook = self:get_logbook()
   if logbook then
     logbook:clock_out()
+    EventManager.dispatch(events.ClockedOut:new(self))
   end
   return self:refresh()
 end
@@ -207,7 +209,7 @@ end
 ---@return boolean
 function Headline:has_tag(tag)
   for _, tag_item in ipairs(self:get_tags()) do
-    if tag_item:lower() == tag:lower() then
+    if tag_item == tag then
       return true
     end
   end
@@ -270,7 +272,12 @@ function Headline:set_tags(tags)
   local end_col = line:len()
 
   local text = ''
-  tags = vim.trim(tags):gsub('^:', ''):gsub(':$', '')
+  tags = vim
+    .trim(tags)
+    :gsub('[%s:-]+', ':') -- Convert all whitespace, existing colons and hyphens into a single colon
+    :gsub('^:', '')
+    :gsub(':$', '')
+
   if tags ~= '' then
     tags = ':' .. tags .. ':'
 
@@ -285,6 +292,49 @@ function Headline:set_tags(tags)
   end
 
   vim.api.nvim_buf_set_text(bufnr, pred_end_row, pred_end_col, pred_end_row, end_col, { text })
+end
+
+---@param tag string
+---@return boolean newly_added
+function Headline:add_tag(tag)
+  local current_tags = self:get_own_tags()
+  local present = vim.tbl_contains(current_tags, tag)
+  if not present then
+    table.insert(current_tags, tag)
+  end
+  self:set_tags(utils.tags_to_string(current_tags))
+  return not present
+end
+
+---@param tag string
+---@return boolean newly_removed
+function Headline:remove_tag(tag)
+  local current_tags = self:get_own_tags()
+  ---@type string[]
+  local new_tags = vim.tbl_filter(function(i)
+    return i ~= tag
+  end, current_tags)
+  local present = #new_tags ~= #current_tags
+  if present then
+    self:set_tags(utils.tags_to_string(new_tags))
+  end
+  return present
+end
+
+---@param tag string
+---@return boolean newly_added
+function Headline:toggle_tag(tag)
+  local current_tags = self:get_own_tags()
+  local present = vim.tbl_contains(current_tags, tag)
+  if present then
+    current_tags = vim.tbl_filter(function(i)
+      return i ~= tag
+    end, current_tags)
+  else
+    table.insert(current_tags, tag)
+  end
+  self:set_tags(utils.tags_to_string(current_tags))
+  return not present
 end
 
 function Headline:align_tags()
@@ -316,18 +366,20 @@ end
 function Headline:set_todo(keyword)
   local todo, node = self:get_todo()
   if todo then
-    return self:_set_node_text(node, keyword)
+    self:_set_node_text(node, keyword)
+    return self:update_parent_cookie()
   end
 
   local stars = self:_get_child_node('stars')
   local _, level = stars:end_()
-  return self:_set_node_text(stars, ('%s %s'):format(('*'):rep(level), keyword))
+  self:_set_node_text(stars, ('%s %s'):format(('*'):rep(level), keyword))
+  return self:update_parent_cookie()
 end
 
 memoize('get_todo')
 --- Returns the headlines todo keyword, it's node,
---- and it's type (todo or done)
---- @return string | nil, TSNode | nil, string | nil
+--- it's type (todo or done) and it's index in the todo_keywords list
+--- @return string | nil, TSNode | nil, string | nil, number | nil
 function Headline:get_todo()
   -- A valid keyword can only be the first child
   local first_item_node = self:_get_child_node('item')
@@ -336,15 +388,15 @@ function Headline:get_todo()
     return nil, nil, nil
   end
 
-  local todo_keywords = config:get_todo_keywords()
+  local todo_keywords = self.file:get_todo_keywords()
 
   local text = self.file:get_node_text(todo_node)
   local keyword_by_value = todo_keywords:find(text)
   if not keyword_by_value then
-    return nil, nil, nil
+    return nil, nil, nil, nil
   end
 
-  return text, todo_node, keyword_by_value.type
+  return text, todo_node, keyword_by_value.type, keyword_by_value.index
 end
 
 ---@return boolean
@@ -360,32 +412,29 @@ function Headline:is_done()
 end
 
 memoize('get_title')
----@return string
+---@return string, number
 function Headline:get_title()
-  local title = self.file:get_node_text(self:_get_child_node('item')) or ''
+  local title_node = self:_get_child_node('item')
+  local title = self.file:get_node_text(title_node) or ''
   local word, todo_node = self:get_todo()
+  local offset = title_node and select(2, title_node:start()) or 0
   if todo_node and word then
-    title = title:gsub('^' .. vim.pesc(word) .. '%s*', '')
+    local new_title = title:gsub('^' .. vim.pesc(word) .. '%s*', '')
+    offset = offset + (title:len() - new_title:len())
+    title = new_title
   end
   local priority, priority_node = self:get_priority()
   if priority_node then
-    title = title:gsub('^' .. vim.pesc(('[#%s]'):format(priority)) .. '%s*', '')
+    local new_title = title:gsub('^' .. vim.pesc(('[#%s]'):format(priority)) .. '%s*', '')
+    offset = offset + title:len() - new_title:len()
+    title = new_title
   end
-  return title
+  return title, offset
 end
 
-function Headline:get_title_with_priority()
-  local priority = self:get_priority()
-  local title = self:get_title()
-  if priority ~= '' then
-    return ('[#%s] %s'):format(priority, self:get_title())
-  end
-  return title
-end
-
-memoize('get_properties')
+memoize('get_own_properties')
 ---@return table<string, string>, TSNode | nil
-function Headline:get_properties()
+function Headline:get_own_properties()
   local section = self:node():parent()
   local properties_node = section and section:field('property_drawer')[1]
 
@@ -409,34 +458,60 @@ function Headline:get_properties()
   return properties, properties_node
 end
 
+memoize('get_properties')
+---@return table<string, string>, TSNode | nil
+function Headline:get_properties()
+  local properties, own_properties_node = self:get_own_properties()
+
+  if not config.org_use_property_inheritance then
+    return properties, own_properties_node
+  end
+
+  local parent_section = self:node():parent():parent()
+  while parent_section do
+    local headline_node = parent_section:field('headline')[1]
+    if headline_node then
+      local headline = Headline:new(headline_node, self.file)
+      for name, value in pairs(headline:get_own_properties()) do
+        if properties[name] == nil and config:use_property_inheritance(name) then
+          properties[name] = value
+        end
+      end
+    end
+    parent_section = parent_section:parent()
+  end
+
+  return properties, own_properties_node
+end
+
 ---@param name string
 ---@param value? string
 ---@return OrgHeadline
 function Headline:set_property(name, value)
   local bufnr = self.file:get_valid_bufnr()
   if not value then
-    local existing_property, property_node = self:get_property(name)
+    local existing_property, property_node = self:get_property(name, false)
     if existing_property and property_node then
       vim.fn.deletebufline(bufnr, property_node:start() + 1)
     end
     self:refresh()
-    local properties, properties_node = self:get_properties()
+    local properties, properties_node = self:get_own_properties()
     if vim.tbl_isempty(properties) then
       self:_set_node_lines(properties_node, {})
     end
     return self:refresh()
   end
 
-  local _, properties = self:get_properties()
+  local _, properties = self:get_own_properties()
   if not properties then
     local append_line = self:get_append_line()
     local property_drawer = self:_apply_indent({ ':PROPERTIES:', ':END:' }) --[[ @as string[] ]]
     vim.api.nvim_buf_set_lines(bufnr, append_line, append_line, false, property_drawer)
-    _, properties = self:refresh():get_properties()
+    _, properties = self:refresh():get_own_properties()
   end
 
   local property = (':%s: %s'):format(name, value)
-  local existing_property, property_node = self:get_property(name)
+  local existing_property, property_node = self:get_property(name, false)
   if existing_property then
     return self:_set_node_text(property_node, property)
   end
@@ -461,14 +536,18 @@ function Headline:add_note(note)
     append_line = self:get_append_line()
   end
   vim.api.nvim_buf_set_lines(self.file:get_valid_bufnr(), append_line, append_line, false, note)
+  EventManager.dispatch(events.NoteAdded:new(self, note))
   return self:refresh()
 end
 
 ---@param property_name string
----@param search_parents? boolean
+---@param search_parents? boolean if true, search parent headlines;
+---                               if false, only search this headline;
+---                               if nil (default), check
+---                               `org_use_property_inheritance`
 ---@return string | nil, TSNode | nil
 function Headline:get_property(property_name, search_parents)
-  local _, properties = self:get_properties()
+  local _, properties = self:get_own_properties()
   if properties then
     for _, node in ipairs(ts_utils.get_named_children(properties)) do
       local name = node:field('name')[1]
@@ -477,6 +556,10 @@ function Headline:get_property(property_name, search_parents)
         return value and self.file:get_node_text(value) or '', node
       end
     end
+  end
+
+  if search_parents == nil then
+    search_parents = config:use_property_inheritance(property_name)
   end
 
   if not search_parents then
@@ -488,7 +571,7 @@ function Headline:get_property(property_name, search_parents)
     local headline_node = parent_section:field('headline')[1]
     if headline_node then
       local headline = Headline:new(headline_node, self.file)
-      local property, property_node = headline:get_property(property_name)
+      local property, property_node = headline:get_property(property_name, false)
       if property then
         return property, property_node
       end
@@ -536,7 +619,7 @@ memoize('get_tags')
 function Headline:get_tags()
   local tags, own_tags_node = self:get_own_tags()
   if not config.org_use_tag_inheritance then
-    return config:exclude_tags(tags), own_tags_node
+    return tags, own_tags_node
   end
 
   local parent_tags = {}
@@ -622,7 +705,7 @@ end
 
 ---@return number
 function Headline:get_append_line()
-  local _, properties = self:get_properties()
+  local _, properties = self:get_own_properties()
   if properties then
     local row = properties:end_()
     return row
@@ -665,8 +748,7 @@ function Headline:get_plan_dates()
     if name ~= 'NONE' then
       has_plan_dates = true
     end
-    dates[name:upper()] = Date.from_org_date(self.file:get_node_text(timestamp), {
-      range = Range.from_node(timestamp),
+    dates[name:upper()] = Date.from_node(timestamp, self.file:get_source(), {
       type = name:upper(),
     })
     dates_nodes[name:upper()] = node
@@ -690,44 +772,50 @@ memoize('get_non_plan_dates')
 function Headline:get_non_plan_dates()
   local headline_node = self:node()
   local section = headline_node:parent()
-  local body = section and section:field('body')[1]
-  local headline_text = self.file:get_node_text(headline_node) or ''
-  local dates = Date.parse_all_from_line(headline_text, self:node():start() + 1)
-  local properties_node = section and section:field('property_drawer')[1]
-
-  if properties_node then
-    local properties_text = self.file:get_node_text_list(properties_node) or {}
-    local start = properties_node:start()
-    for i, line in ipairs(properties_text) do
-      vim.list_extend(dates, Date.parse_all_from_line(line, start + i))
-    end
+  if not section then
+    return {}
   end
 
-  if not body then
-    return dates
+  local body_node = section:field('body')[1]
+  local property_node = section:field('property_drawer')[1]
+  local matches = {}
+
+  local headline_matches = self.file:get_ts_captures('(item (timestamp) @timestamp)', headline_node)
+  vim.list_extend(matches, headline_matches)
+
+  if property_node then
+    local property_matches = self.file:get_ts_captures('(property (value (timestamp) @timestamp))', property_node)
+    vim.list_extend(matches, property_matches)
   end
 
-  local start_line = body:range()
-  local lines = self.file:get_node_text_list(body, ts_utils.range_with_zero_start_col(body))
-  for i, line in ipairs(lines) do
-    local line_dates = Date.parse_all_from_line(line, start_line + i)
-    local is_clock_line = line:match('^%s*:?CLOCK:') ~= nil
-    for _, date in ipairs(line_dates) do
-      -- Assume that the date is part of logbook if line starts with clock
-      -- TODO: Make this more reliable
-      if not date.active and is_clock_line then
-        date.type = 'LOGBOOK'
-      end
-    end
-    vim.list_extend(dates, line_dates)
+  if body_node then
+    local body_matches = self.file:get_ts_captures(
+      [[
+        (paragraph (timestamp) @timestamp)
+        (table (row (cell (contents (timestamp) @timestamp))))
+        (drawer (contents (timestamp) @timestamp))
+        (fndef (description (timestamp) @timestamp))
+      ]],
+      body_node
+    )
+    vim.list_extend(matches, body_matches)
   end
 
-  return dates
+  local all_dates = {}
+  local source = self.file:get_source()
+  for _, match in ipairs(matches) do
+    local dates = Date.from_node(match, source)
+    vim.list_extend(all_dates, dates)
+  end
+
+  return all_dates
 end
 
-function Headline:tags_to_string()
+---@param sorted? boolean
+---@return string, TSNode | nil
+function Headline:tags_to_string(sorted)
   local tags, node = self:get_tags()
-  return utils.tags_to_string(tags), node
+  return utils.tags_to_string(tags, sorted), node
 end
 
 ---@return boolean
@@ -757,7 +845,7 @@ end
 ---@param category string
 ---@return boolean
 function Headline:matches_category(category)
-  return self:get_category():lower() == category:lower()
+  return self:get_category() == category
 end
 
 ---@return OrgDate[]
@@ -766,7 +854,7 @@ function Headline:get_valid_dates_for_agenda()
   for _, date in ipairs(self:get_all_dates()) do
     if date.active and not date:is_closed() and not date:is_obsolete_range_end() then
       table.insert(dates, date)
-      if not date:is_none() and date.related_date_range then
+      if not date:is_none() and date.related_date then
         local new_date = date:clone({ type = 'NONE' })
         table.insert(dates, new_date)
       end
@@ -814,22 +902,81 @@ function Headline:get_cookie()
   return self:_parse_title_part('%[%d?%d?%d?%%%]')
 end
 
-function Headline:update_cookie(list_node)
-  local total_boxes = self:child_checkboxes(list_node)
-  local checked_boxes = vim.tbl_filter(function(box)
-    return box:match('%[%w%]')
-  end, total_boxes)
-
-  local cookie = self:get_cookie()
-  if cookie then
-    local new_cookie_val
-    if self.file:get_node_text(cookie):find('%%') then
-      new_cookie_val = ('[%d%%]'):format((#checked_boxes / #total_boxes) * 100)
-    else
-      new_cookie_val = ('[%d/%d]'):format(#checked_boxes, #total_boxes)
-    end
-    return self:_set_node_text(cookie, new_cookie_val)
+function Headline:_set_cookie(cookie, num, denum)
+  -- Update the cookie
+  local new_cookie_val
+  if self.file:get_node_text(cookie):find('%%') then
+    new_cookie_val = ('[%d%%]'):format((num / denum) * 100)
+  else
+    new_cookie_val = ('[%d/%d]'):format(num, denum)
   end
+  return self:_set_node_text(cookie, new_cookie_val)
+end
+
+function Headline:update_cookie()
+  -- Update cookie state from a check box state change
+
+  -- Return early if the headline doesn't have a cookie
+  local cookie = self:get_cookie()
+  if not cookie then
+    return self
+  end
+
+  local section = self:node():parent()
+  if not section then
+    return self
+  end
+
+  -- Count checked boxes from all lists
+  local num_checked_boxes, num_boxes = 0, 0
+  local body = section:field('body')[1]
+  if body then
+    for node in body:iter_children() do
+      if node:type() == 'list' then
+        local boxes = self:child_checkboxes(node)
+        num_boxes = num_boxes + #boxes
+        local checked_boxes = vim.tbl_filter(function(box)
+          return box:match('%[%w%]')
+        end, boxes)
+        num_checked_boxes = num_checked_boxes + #checked_boxes
+      end
+    end
+  end
+
+  -- Set the cookie
+  return self:_set_cookie(cookie, num_checked_boxes, num_boxes)
+end
+
+function Headline:update_todo_cookie()
+  -- Update cookie state from a TODO state change
+
+  -- Return early if the headline doesn't have a cookie
+  local cookie = self:get_cookie()
+  if not cookie then
+    return self
+  end
+
+  -- Count done children headlines and total children with TODO keywords
+  local children = self:get_child_headlines()
+  local headlines_with_todo = vim.tbl_filter(function(h)
+    local todo, _, _ = h:get_todo()
+    return todo ~= nil
+  end, children)
+
+  local dones = vim.tbl_filter(function(h)
+    return h:is_done()
+  end, headlines_with_todo)
+
+  -- Set the cookie
+  return self:_set_cookie(cookie, #dones, #headlines_with_todo)
+end
+
+function Headline:update_parent_cookie()
+  local parent = self:get_parent_headline()
+  if parent and parent.headline then
+    parent:update_todo_cookie()
+  end
+  return self
 end
 
 function Headline:child_checkboxes(list_node)
@@ -909,7 +1056,7 @@ function Headline:is_same(other_headline)
 end
 
 function Headline:id_get_or_create()
-  local id_prop = self:get_property('ID')
+  local id_prop = self:get_property('ID', false)
   if id_prop then
     return vim.trim(id_prop)
   end
@@ -1060,6 +1207,20 @@ function Headline:_handle_promote_demote(recursive, modifier, dryRun)
     return lines
   end
   vim.api.nvim_buf_set_lines(bufnr, start, end_line, false, lines)
+  return self:refresh()
+end
+
+---@param drawer_name string
+---@param content string
+---@return OrgHeadline
+function Headline:add_to_drawer(drawer_name, content)
+  local append_line = self:get_drawer_append_line(drawer_name)
+  local bufnr = self.file:get_valid_bufnr()
+
+  -- Add the content indented appropriately
+  local indented_content = self:_apply_indent(content) --[[ @as string ]]
+  vim.api.nvim_buf_set_lines(bufnr, append_line, append_line, false, { indented_content })
+
   return self:refresh()
 end
 

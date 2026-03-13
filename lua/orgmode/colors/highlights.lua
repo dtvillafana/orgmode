@@ -61,51 +61,17 @@ function M.link_highlights()
     ['@org.code.delimiter'] = '@markup.raw',
     ['@org.verbatim'] = '@markup.raw',
     ['@org.verbatim.delimiter'] = '@markup.raw',
-    ['@org.hyperlink'] = '@markup.link.url',
+    ['@org.hyperlink'] = '@markup.link',
+    ['@org.hyperlink.url'] = '@markup.link.url',
+    ['@org.hyperlink.desc'] = '@markup.link.label',
     ['@org.latex'] = '@markup.math',
     ['@org.latex_env'] = '@markup.environment',
+    ['@org.footnote'] = '@markup.link.url',
     -- Other
     ['@org.table.delimiter'] = '@punctuation.special',
     ['@org.table.heading'] = '@markup.heading',
     ['@org.edit_src'] = 'Visual',
   }
-
-  if not utils.has_version_10() then
-    links = vim.tbl_extend('force', links, {
-      ['@org.priority.highest'] = 'Error',
-      ['@org.timestamp.active'] = 'PreProc',
-      ['@org.timestamp.inactive'] = 'Comment',
-      ['@org.bullet'] = 'Identifier',
-      ['@org.checkbox'] = 'PreProc',
-      ['@org.checkbox.halfchecked'] = 'PreProc',
-      ['@org.checkbox.checked'] = 'PreProc',
-      ['@org.properties'] = 'Constant',
-      ['@org.properties.name'] = 'Constant',
-      ['@org.drawer'] = 'Constant',
-      ['@org.tag'] = 'Function',
-      ['@org.plan'] = 'Constant',
-      ['@org.comment'] = 'Comment',
-      ['@org.directive'] = 'Comment',
-      ['@org.block'] = 'Comment',
-      ['@org.latex'] = 'Statement',
-      ['@org.latex_env'] = 'Statement',
-      ['@org.hyperlink'] = 'Underlined',
-      ['@org.code'] = 'String',
-      ['@org.code.delimiter'] = 'String',
-      ['@org.verbatim'] = 'String',
-      ['@org.verbatim.delimiter'] = 'String',
-      ['@org.bold'] = { bold = true },
-      ['@org.bold.delimiter'] = { bold = true },
-      ['@org.italic'] = { italic = true },
-      ['@org.italic.delimiter'] = { italic = true },
-      ['@org.strikethrough'] = { strikethrough = true },
-      ['@org.strikethrough.delimiter'] = { strikethrough = true },
-      ['@org.underline'] = { underline = true },
-      ['@org.underline.delimiter'] = { underline = true },
-      ['@org.table.delimiter'] = '@punctuation',
-      ['@org.table.heading'] = '@function',
-    })
-  end
 
   for src, def in pairs(links) do
     if type(def) == 'table' then
@@ -129,6 +95,12 @@ function M.define_agenda_colors()
       string.format('hi default %s guifg=%s ctermfg=%s', hlname, keyword_colors[type].gui, keyword_colors[type].cterm)
     )
   end
+  vim.cmd(
+    ('hi default @org.agenda.time_grid guifg=%s ctermfg=%s'):format(
+      keyword_colors.warning.gui,
+      keyword_colors.warning.cterm
+    )
+  )
 
   M.define_org_todo_keyword_colors()
 end

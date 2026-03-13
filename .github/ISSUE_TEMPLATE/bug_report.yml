@@ -12,6 +12,12 @@ body:
     validations:
       required: true
     attributes:
+      label: checkhealth
+      description: Run `:checkhealth orgmode` and paste the output here
+  - type: textarea
+    validations:
+      required: true
+    attributes:
       label: Steps to reproduce
       description: |
         Steps to reproduce the problem.
@@ -48,6 +54,13 @@ body:
       label: Screenshots and recordings
       description: |
         If applicable, add screenshots to help explain your problem. You can also record an asciinema session: https://asciinema.org/
+  - type: input
+    validations:
+      required: true
+    attributes:
+      label: nvim-orgmode version
+      placeholder: |
+        e.g. 0.4.32. If you are not using version, provide the commit hash
   - type: input
     validations:
       required: true

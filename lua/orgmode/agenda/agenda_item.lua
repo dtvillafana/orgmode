@@ -3,10 +3,10 @@ local hl_map = Highlights.get_agenda_hl_map()
 local config = require('orgmode.config')
 local FUTURE_DEADLINE_AS_WARNING_DAYS = math.floor(config.org_deadline_warning_days / 2)
 local function add_padding(datetime)
-  if datetime:len() >= 11 then
+  if datetime:len() >= 10 then
     return datetime .. ' '
   end
-  return datetime .. string.rep('.', 11 - datetime:len()) .. ' '
+  return datetime .. ' ' .. config.org_agenda_time_grid.time_separator .. ' '
 end
 
 ---@class OrgAgendaItem
@@ -20,13 +20,14 @@ end
 ---@field is_in_date_range boolean
 ---@field date_range_days number
 ---@field label string
----@field highlights table[]
+---@field index number
 local AgendaItem = {}
 
 ---@param headline_date OrgDate single date in a headline
 ---@param headline OrgHeadline
 ---@param date OrgDate date for which item should be rendered
 ---@param index? number
+---@return OrgAgendaItem
 function AgendaItem:new(headline_date, headline, date, index)
   local opts = {}
   opts.headline_date = headline_date
@@ -39,13 +40,13 @@ function AgendaItem:new(headline_date, headline, date, index)
   opts.repeats_on_date = false
   opts.is_same_day = headline_date:is_same(date, 'day')
   if not opts.is_same_day then
-    opts.repeats_on_date = headline_date:repeats_on(date)
+    local repeat_count = config:get_repeat_count()
+    opts.repeats_on_date = headline_date:repeats_on(date, repeat_count)
     opts.is_same_day = opts.repeats_on_date
   end
   opts.is_in_date_range = headline_date:is_none() and headline_date:is_in_date_range(date)
   opts.date_range_days = headline_date:get_date_range_days()
   opts.label = ''
-  opts.highlights = {}
   if opts.repeats_on_date then
     opts.real_date = opts.headline_date:apply_repeater_until(opts.date)
   end
@@ -77,13 +78,6 @@ end
 
 function AgendaItem:_generate_data()
   self.label = self:_generate_label()
-  self.highlights = {}
-  local highlight = self:_generate_highlight()
-  if highlight then
-    table.insert(self.highlights, highlight)
-  end
-  self:_add_keyword_highlight()
-  self:_add_priority_highlight()
 end
 
 function AgendaItem:_is_valid_for_today()
@@ -220,63 +214,48 @@ function AgendaItem:_format_time(date)
   return formatted_time
 end
 
-function AgendaItem:_generate_highlight()
+---@return string | nil
+function AgendaItem:get_hlgroup()
   if self.headline_date:is_deadline() then
     if self.headline:is_done() then
-      return { hlgroup = hl_map.ok }
+      return hl_map.ok
     end
     if self.is_today and self.headline_date:is_after(self.date, 'day') then
       local diff = math.abs(self.date:diff(self.headline_date))
       if diff <= FUTURE_DEADLINE_AS_WARNING_DAYS then
-        return { hlgroup = hl_map.warning }
+        return hl_map.warning
       end
       return nil
     end
 
-    return { hlgroup = hl_map.deadline }
+    return hl_map.deadline
   end
 
   if self.headline_date:is_scheduled() then
     if self.headline_date:is_past('day') and not self.headline:is_done() then
-      return { hlgroup = hl_map.warning }
+      return hl_map.warning
     end
 
-    return { hlgroup = hl_map.ok }
+    return hl_map.ok
   end
 
   return nil
 end
 
-function AgendaItem:_add_keyword_highlight()
+function AgendaItem:get_todo_hlgroup()
   local todo_keyword, _, type = self.headline:get_todo()
   if not todo_keyword then
     return
   end
-  local hlgroup = hl_map[todo_keyword] or hl_map[type]
-  if hlgroup then
-    table.insert(self.highlights, {
-      hlgroup = hlgroup,
-      todo_keyword = todo_keyword,
-    })
-  end
+  return hl_map[todo_keyword] or hl_map[type], todo_keyword
 end
 
-function AgendaItem:_add_priority_highlight()
+function AgendaItem:get_priority_hlgroup()
   local priority, priority_node = self.headline:get_priority()
   if not priority_node then
     return
   end
-  local hlgroup = hl_map.priority[priority].hl_group
-  local last_hl = self.highlights[#self.highlights]
-  local start_col = 2
-  if last_hl and last_hl.todo_keyword then
-    start_col = start_col + last_hl.todo_keyword:len()
-  end
-  table.insert(self.highlights, {
-    hlgroup = hlgroup,
-    priority = priority,
-    start_col = start_col,
-  })
+  return hl_map.priority[priority].hl_group, priority
 end
 
 return AgendaItem

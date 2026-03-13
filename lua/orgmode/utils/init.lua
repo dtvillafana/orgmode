@@ -1,8 +1,7 @@
 local Promise = require('orgmode.utils.promise')
-local uv = vim.loop
+local uv = vim.uv
 local utils = {}
 local debounce_timers = {}
-local tmp_window_augroup = vim.api.nvim_create_augroup('OrgTmpWindow', { clear = true })
 
 ---@param file string full path to filename
 ---@param opts? { raw: boolean, schedule: boolean } raw: Return raw results, schedule: wrap results in vim.schedule
@@ -32,7 +31,7 @@ function utils.readfile(file, opts)
             if opts.raw then
               result = data
             else
-              local lines = vim.split(data, '\n')
+              local lines = vim.split(data, '[\r\n]')
               if lines[#lines] == '' then
                 table.remove(lines, #lines)
               end
@@ -53,9 +52,14 @@ function utils.readfile(file, opts)
   end)
 end
 
-function utils.writefile(file, data)
+---@param file string
+---@param data string|string[]
+---@param opts? {excl?: boolean}
+---@return OrgPromise<integer> bytes
+function utils.writefile(file, data, opts)
   return Promise.new(function(resolve, reject)
-    uv.fs_open(file, 'w', 438, function(err1, fd)
+    local flags = opts and opts.excl and 'wx' or 'w'
+    uv.fs_open(file, flags, 438, function(err1, fd)
       if err1 then
         return reject(err1)
       end
@@ -83,25 +87,11 @@ end
 
 function utils.system_notification(message)
   if vim.fn.executable('notify-send') == 1 then
-    vim.loop.spawn('notify-send', { args = { message } })
+    uv.spawn('notify-send', { args = { message } })
   end
 
   if vim.fn.executable('terminal-notifier') == 1 then
-    vim.loop.spawn('terminal-notifier', { args = { '-message', message } })
-  end
-end
-
-function utils.open(target)
-  if vim.fn.executable('xdg-open') == 1 then
-    return vim.fn.system(string.format('xdg-open %s', target))
-  end
-
-  if vim.fn.executable('open') == 1 then
-    return vim.fn.system(string.format('open %s', target))
-  end
-
-  if vim.fn.has('win32') == 1 then
-    return vim.fn.system(string.format('start "%s"', target))
+    uv.spawn('terminal-notifier', { args = { '-message', message } })
   end
 end
 
@@ -178,7 +168,7 @@ end
 ---@param acc any
 ---@return unknown
 function utils.reduce(tbl, callback, acc)
-  for i, v in pairs(tbl) do
+  for i, v in ipairs(tbl) do
     acc = callback(acc, v, i)
   end
   return acc
@@ -245,17 +235,22 @@ end
 function utils.parse_tags_string(tags)
   local parsed_tags = {}
   for _, tag in ipairs(vim.split(tags or '', ':')) do
-    if tag:find('^[%w_%%@#]+$') then
+    if tag:find('^[\128-\255%w_%%@#]+$') then
       table.insert(parsed_tags, tag)
     end
   end
   return parsed_tags
 end
 
-function utils.tags_to_string(taglist)
+function utils.tags_to_string(taglist, sorted)
   local tags = ''
+  local tags_list = taglist
   if #taglist > 0 then
-    tags = ':' .. table.concat(taglist, ':') .. ':'
+    if sorted then
+      tags_list = vim.deepcopy(taglist)
+      table.sort(tags_list)
+    end
+    tags = ':' .. table.concat(tags_list, ':') .. ':'
   end
   return tags
 end
@@ -321,9 +316,9 @@ end
 ---@param name string
 ---@return function
 function utils.profile(name)
-  local start_time = vim.loop.hrtime()
+  local start_time = uv.hrtime()
   return function()
-    return print(name, string.format('%.2f', (vim.loop.hrtime() - start_time) / 1000000))
+    return print(name, string.format('%.2f', (uv.hrtime() - start_time) / 1000000))
   end
 end
 
@@ -419,17 +414,17 @@ function utils.open_tmp_org_window(height, split_mode, border, on_close)
   utils.open_window(vim.fn.tempname() .. '.org', height or 16, split_mode, border)
   vim.cmd([[setlocal filetype=org bufhidden=wipe nobuflisted nolist noswapfile nofoldenable]])
   local bufnr = vim.api.nvim_get_current_buf()
+  local augroup = vim.api.nvim_create_augroup('OrgTmpWindow_' .. bufnr, { clear = true })
 
   if on_close then
     vim.api.nvim_create_autocmd('BufWipeout', {
-      buffer = 0,
-      group = tmp_window_augroup,
+      buffer = bufnr,
+      group = augroup,
       callback = on_close,
       once = true,
     })
     vim.api.nvim_create_autocmd('VimLeavePre', {
-      buffer = 0,
-      group = tmp_window_augroup,
+      group = augroup,
       callback = on_close,
       once = true,
     })
@@ -446,7 +441,7 @@ function utils.open_tmp_org_window(height, split_mode, border, on_close)
   end
 
   return function()
-    vim.api.nvim_create_augroup('OrgTmpWindow', { clear = true })
+    vim.api.nvim_create_augroup('OrgTmpWindow_' .. bufnr, { clear = true })
     close_win()
     if prev_winnr and vim.api.nvim_win_is_valid(prev_winnr) then
       vim.api.nvim_set_current_win(prev_winnr)
@@ -494,6 +489,7 @@ function utils.is_list(value)
   if vim.islist then
     return vim.islist(value)
   end
+  ---@diagnostic disable-next-line: deprecated
   return vim.tbl_islist(value)
 end
 
@@ -528,13 +524,15 @@ function utils.edit_file(filename)
       vim.api.nvim_open_win(bufnr, true, {
         relative = 'editor',
         width = 1,
-        -- TODO: Revert to 1 once the https://github.com/neovim/neovim/issues/19464 is fixed
-        height = 2,
+        height = 1,
         row = 99999,
         col = 99999,
         zindex = 1,
         style = 'minimal',
+        focusable = false,
+        hide = true,
       })
+      vim.api.nvim_set_option_value('swapfile', false, { buf = bufnr })
     end,
     close = function()
       vim.cmd('silent! w')
@@ -547,11 +545,6 @@ function utils.edit_file(filename)
       vim.api.nvim_set_current_win(cur_win)
     end,
   }
-end
-
-function utils.has_version_10()
-  local v = vim.version()
-  return not vim.version.lt({ v.major, v.minor, v.patch }, { 0, 10, 0 })
 end
 
 ---@generic EntryType : any
@@ -567,38 +560,66 @@ function utils.find(entries, check_fn)
   return nil
 end
 
----@param name string
----@param skip_ftmatch? boolean
----@return string
-function utils.detect_filetype(name, skip_ftmatch)
-  local map = {
-    ['emacs-lisp'] = 'lisp',
-    js = 'javascript',
-    ts = 'typescript',
-    md = 'markdown',
-    ex = 'elixir',
-    pl = 'perl',
-    sh = 'bash',
-    uxn = 'uxntal',
-  }
-  if not skip_ftmatch then
-    local filename = '__org__detect_filetype__.' .. (map[name] or name)
-    local ft = vim.filetype.match({ filename = filename })
-    if ft then
-      return ft
-    end
-  end
-  if map[name] then
-    return map[name]
-  end
-  return name:lower()
-end
-
 ---@param filename string
 ---@return boolean
 function utils.is_org_file(filename)
   local ext = vim.fn.fnamemodify(filename, ':e')
   return ext == 'org' or ext == 'org_archive'
+end
+
+function utils.sorted_pairs(t)
+  local keys = vim.tbl_keys(t)
+  table.sort(keys)
+  local i = 0
+  return function()
+    i = i + 1
+    return keys[i], t[keys[i]]
+  end
+end
+
+---@param headline OrgHeadline
+function utils.goto_headline(headline)
+  local current_file_path = utils.current_file_path()
+  if headline.file.filename ~= current_file_path then
+    vim.cmd(string.format('edit %s', headline.file.filename))
+  else
+    vim.cmd([[normal! m']]) -- add link source to jumplist
+  end
+  vim.fn.cursor({ headline:get_range().start_line, 1 })
+  vim.cmd([[normal! zv]])
+end
+
+---@return string
+function utils.get_visual_selection()
+  return table.concat(vim.fn.getregion(vim.fn.getpos('v'), vim.fn.getpos('.')), '\n')
+end
+
+---@param msg string|string[]
+---@param opts? { level?: 'info' | 'warn' | 'error', id: string  }
+---@return string
+function utils.notify(msg, opts)
+  opts = vim.tbl_extend('force', {
+    title = 'Orgmode',
+    level = 'info',
+  }, opts or {})
+
+  local message = type(msg) == 'table' and table.concat(msg, '\n') or msg --[[@as string]]
+  vim.notify(message, vim.log.levels[opts.level:upper()], opts)
+end
+
+---Return first non-nil value
+---@generic T
+---@param ... T
+---@return T
+function utils.if_nil(...)
+  local nargs = select('#', ...)
+  for i = 1, nargs do
+    local v = select(i, ...)
+    if v ~= nil then
+      return v
+    end
+  end
+  return nil
 end
 
 return utils

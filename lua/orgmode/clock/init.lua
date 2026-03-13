@@ -1,6 +1,7 @@
 local Duration = require('orgmode.objects.duration')
 local utils = require('orgmode.utils')
 local Promise = require('orgmode.utils.promise')
+local Input = require('orgmode.ui.input')
 
 ---@class OrgClock
 ---@field files OrgFiles
@@ -92,22 +93,24 @@ function Clock:org_clock_goto()
     utils.echo_info('No running clock, this is the most recently clocked task')
   end
 
-  if utils.current_file_path() ~= self.clocked_headline.file then
-    vim.cmd('edit ' .. vim.fn.fnameescape(self.clocked_headline.file.filename))
-  end
-  vim.fn.cursor({ self.clocked_headline:get_range().start_line, 1 })
+  utils.goto_headline(self.clocked_headline)
 end
 
 function Clock:org_set_effort()
   local item = self.files:get_closest_headline()
   -- TODO: Add Effort_ALL property as autocompletion
   local current_effort = item:get_property('Effort')
-  local effort = vim.fn.OrgmodeInput('Effort: ', current_effort or '')
-  local duration = Duration.parse(effort)
-  if duration == nil then
-    return utils.echo_error('Invalid duration format: ' .. effort)
-  end
-  item:set_property('Effort', effort)
+  return Input.open('Effort: ', current_effort or ''):next(function(effort)
+    if not effort then
+      return false
+    end
+    local duration = Duration.parse(effort)
+    if duration == nil then
+      return utils.echo_error('Invalid duration format: ' .. effort)
+    end
+    item:set_property('Effort', effort)
+    return item
+  end)
 end
 
 function Clock:get_statusline()
@@ -115,7 +118,7 @@ function Clock:get_statusline()
     return ''
   end
 
-  local effort = self.clocked_headline:get_property('effort')
+  local effort = self.clocked_headline:get_property('effort', false)
   local total = self.clocked_headline:get_logbook():get_total_with_active():to_string()
   if effort then
     return string.format('(Org) [%s/%s] (%s)', total, effort or '', self.clocked_headline:get_title())

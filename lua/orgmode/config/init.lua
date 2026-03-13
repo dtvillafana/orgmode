@@ -7,9 +7,10 @@ local mappings = require('orgmode.config.mappings')
 local TodoKeywords = require('orgmode.objects.todo_keywords')
 local PriorityState = require('orgmode.objects.priority_state')
 
----@class OrgConfig:OrgDefaultConfig
+---@class OrgConfig:OrgConfigOpts
 ---@field opts table
 ---@field todo_keywords OrgTodoKeywords
+---@field priorities table<string, { type: string, hl_group: string }>
 local Config = {}
 
 ---@param opts? table
@@ -17,6 +18,7 @@ function Config:new(opts)
   local data = {
     opts = vim.tbl_deep_extend('force', defaults, opts or {}),
     todo_keywords = nil,
+    priorities = nil,
   }
   setmetatable(data, self)
   return data
@@ -30,23 +32,19 @@ function Config:__index(key)
 end
 
 function Config:install_grammar()
-  local ok, result, err = pcall(vim.treesitter.language.add, 'org')
-  if not ok or (not result and err ~= nil) then
-    require('orgmode.utils.treesitter.install').run()
-  end
+  return require('orgmode.utils.treesitter.install').install()
 end
 
----@param url? string
-function Config:reinstall_grammar(url)
-  return require('orgmode.utils.treesitter.install').run(url)
+function Config:reinstall_grammar()
+  return require('orgmode.utils.treesitter.install').reinstall()
 end
 
 ---@param opts table
 ---@return OrgConfig
 function Config:extend(opts)
   self.todo_keywords = nil
+  self.priorities = nil
   opts = opts or {}
-  self:_deprecation_notify(opts)
   if not self:_are_priorities_valid(opts) then
     opts.org_priority_highest = self.opts.org_priority_highest
     opts.org_priority_lowest = self.opts.org_priority_lowest
@@ -139,24 +137,6 @@ function Config:_are_priorities_valid(opts)
   return true
 end
 
-function Config:_deprecation_notify(opts)
-  local messages = {}
-  if opts.org_indent_mode and type(opts.org_indent_mode) == 'string' then
-    table.insert(
-      messages,
-      '"org_indent_mode" is deprecated in favor of "org_startup_indented". Check the documentation about the new option.'
-    )
-    opts.org_startup_indented = (opts.org_indent_mode == 'indent')
-  end
-
-  if #messages > 0 then
-    -- Schedule so it gets printed out once whole init.vim is loaded
-    vim.schedule(function()
-      utils.echo_warning(table.concat(messages, '\n'))
-    end)
-  end
-end
-
 ---@return number
 function Config:get_week_start_day_number()
   return utils.convert_from_isoweekday(1)
@@ -196,14 +176,18 @@ end
 
 ---@return OrgTodoKeywords
 function Config:get_todo_keywords()
-  if self.todo_keywords then
-    return self.todo_keywords
+  if not self.todo_keywords then
+    self.todo_keywords = self:build_todo_keywords()
   end
-  self.todo_keywords = TodoKeywords:new({
-    org_todo_keywords = self.opts.org_todo_keywords,
+  return self.todo_keywords
+end
+
+---@param todo_keywords? string[] | string[][]
+function Config:build_todo_keywords(todo_keywords)
+  return TodoKeywords:new({
+    org_todo_keywords = todo_keywords or self.opts.org_todo_keywords,
     org_todo_keyword_faces = self.opts.org_todo_keyword_faces,
   })
-  return self.todo_keywords
 end
 
 --- Setup mappings for a given category and buffer
@@ -211,16 +195,6 @@ end
 ---@param buffer number? Buffer id
 ---@see orgmode.config.mappings
 function Config:setup_mappings(category, buffer)
-  if category == 'org' and vim.bo.filetype == 'org' and not vim.b[buffer].org_old_cr_mapping then
-    local old_mapping = utils.get_keymap({
-      mode = 'i',
-      lhs = '<CR>',
-      buffer = buffer,
-    })
-    if old_mapping and old_mapping.rhs ~= '<Cmd>lua require("orgmode").action("org_mappings.org_return")<CR>' then
-      vim.b[buffer].org_old_cr_mapping = old_mapping
-    end
-  end
   local maps = self:get_mappings(category, buffer)
   if not maps then
     return
@@ -340,6 +314,10 @@ function Config:get_priority_range()
 end
 
 function Config:get_priorities()
+  if self.priorities then
+    return self.priorities
+  end
+
   local priorities = {
     [self.opts.org_priority_highest] = { type = 'highest', hl_group = '@org.priority.highest' },
   }
@@ -365,6 +343,9 @@ function Config:get_priorities()
   -- we need to overwrite the lowest value set by the second loop
   priorities[self.opts.org_priority_lowest] = { type = 'lowest', hl_group = '@org.priority.lowest' }
 
+  -- Cache priorities to avoid unnecessary recalculations
+  self.priorities = priorities
+
   return priorities
 end
 
@@ -374,51 +355,69 @@ function Config:setup_ts_predicates()
 
   vim.treesitter.query.add_predicate('org-is-todo-keyword?', function(match, _, source, predicate)
     local node = match[predicate[2]]
+    node = node and node[#node]
     if node then
       local text = vim.treesitter.get_node_text(node, source)
       return todo_keywords[text] and todo_keywords[text].type == predicate[3] or false
     end
 
     return false
-  end, { force = true, all = false })
+  end, { force = true, all = true })
+
+  local org_cycle_separator_lines = math.max(self.opts.org_cycle_separator_lines, 0)
+
+  vim.treesitter.query.add_directive('org-set-fold-offset!', function(match, _, bufnr, pred, metadata)
+    if org_cycle_separator_lines == 0 then
+      return
+    end
+    local capture_id = pred[2]
+    local section_node = match[capture_id]
+    section_node = section_node and section_node[#section_node]
+    if not capture_id or not section_node or section_node:type() ~= 'section' then
+      return
+    end
+    if not metadata[capture_id] then
+      metadata[capture_id] = {}
+    end
+    local range = metadata[capture_id].range or { section_node:range() }
+    local start_row = range[1]
+    local end_row = range[3]
+
+    local empty_lines = 0
+    while end_row > start_row do
+      local line = vim.api.nvim_buf_get_lines(bufnr, end_row - 1, end_row, false)[1]
+      if vim.trim(line) ~= '' then
+        break
+      end
+      empty_lines = empty_lines + 1
+      end_row = end_row - 1
+    end
+
+    if empty_lines < org_cycle_separator_lines then
+      return
+    end
+    range[3] = range[3] - 1
+    metadata[capture_id].range = range
+  end, { force = true, all = true })
 
   vim.treesitter.query.add_predicate('org-is-valid-priority?', function(match, _, source, predicate)
+    ---@type TSNode | nil
     local node = match[predicate[2]]
-    local type = predicate[3]
+    node = node and node[#node]
     if not node then
       return false
     end
 
+    local type = predicate[3]
     local text = vim.treesitter.get_node_text(node, source)
-    local is_valid = valid_priorities[text] and valid_priorities[text].type == type
-    if not is_valid then
-      return false
-    end
-    local priority_text = '[#' .. text .. ']'
-    local full_node_text = vim.treesitter.get_node_text(node:parent(), source)
-    if priority_text ~= full_node_text then
-      return false
-    end
-
-    local prev_sibling = node:parent():prev_sibling()
-    -- If first child, consider it valid
-    if not prev_sibling then
-      return true
-    end
-
-    -- If prev sibling has more prev siblings, it means that the prev_sibling is not a todo keyword
-    -- so this priority is not valid
-    if prev_sibling:prev_sibling() then
-      return false
-    end
-
-    local todo_text = vim.treesitter.get_node_text(prev_sibling, source)
-    local is_prev_sibling_todo_keyword = todo_keywords[todo_text] and true or false
-    return is_prev_sibling_todo_keyword
-  end, { force = true, all = false })
+    -- Leave only priority cookie: [#A] -> A
+    text = text:sub(3, -2)
+    return valid_priorities[text] and valid_priorities[text].type == type
+  end, { force = true, all = true })
 
   vim.treesitter.query.add_directive('org-set-block-language!', function(match, _, bufnr, pred, metadata)
     local lang_node = match[pred[2]]
+    lang_node = lang_node and lang_node[#lang_node]
     if not lang_node then
       return
     end
@@ -426,19 +425,36 @@ function Config:setup_ts_predicates()
     if not text or vim.trim(text) == '' then
       return
     end
-    metadata['injection.language'] = utils.detect_filetype(text, true)
-  end, { force = true, all = false })
+    metadata['injection.language'] = self:detect_filetype(text)
+  end, { force = true, all = true })
+
+  vim.treesitter.query.add_directive('org-set-inline-block-language!', function(match, _, bufnr, pred, metadata)
+    local lang_node = match[pred[2]]
+    lang_node = lang_node and lang_node[#lang_node]
+    if not lang_node then
+      return
+    end
+    local text = vim.treesitter.get_node_text(lang_node, bufnr)
+    if not text or vim.trim(text) == '' then
+      return
+    end
+    -- Remove `src_` part: src_lua -> lua
+    text = text:sub(5)
+    -- Remove opening brackend and parameters: lua[params]{ -> lua
+    text = text:gsub('[%{%[].*', '')
+    metadata['injection.language'] = self:detect_filetype(text)
+  end, { force = true, all = true })
 
   vim.treesitter.query.add_predicate('org-is-headline-level?', function(match, _, _, predicate)
-    ---@type TSNode
     local node = match[predicate[2]]
-    local level = tonumber(predicate[3])
+    node = node and node[#node]
     if not node then
       return false
     end
+    local level = tonumber(predicate[3])
     local _, _, _, node_end_col = node:range()
     return ((node_end_col - 1) % 8) + 1 == level
-  end, { force = true, all = false })
+  end, { force = true, all = true })
 end
 
 ---@param content table
@@ -509,6 +525,107 @@ function Config:parse_header_args(args)
   end
 
   return results
+end
+
+---@param property_name string
+---@return boolean uses_inheritance
+function Config:use_property_inheritance(property_name)
+  property_name = string.lower(property_name)
+
+  local use_inheritance = self.opts.org_use_property_inheritance or false
+
+  if type(use_inheritance) == 'table' then
+    return vim.tbl_contains(use_inheritance, function(value)
+      return vim.stricmp(value, property_name) == 0
+    end, { predicate = true })
+  elseif type(use_inheritance) == 'string' then
+    local regex = vim.regex(use_inheritance)
+    return regex:match_str(property_name) and true or false
+  else
+    return use_inheritance and true or false
+  end
+end
+
+-- Return repeat count depending on `org_agenda_show_future_repeats` value.
+-- If nil, repeat infinitely.
+-- @return number|nil
+function Config:get_repeat_count()
+  if self.org_agenda_show_future_repeats == true then
+    return nil
+  end
+
+  if self.org_agenda_show_future_repeats == false then
+    return 0
+  end
+
+  if self.org_agenda_show_future_repeats == 'next' then
+    return 1
+  end
+  if type(self.org_agenda_show_future_repeats) == 'number' and self.org_agenda_show_future_repeats >= 0 then
+    return self.org_agenda_show_future_repeats
+  end
+
+  utils.echo_error({
+    'Invalid value for `org_agenda_show_future_repeats`',
+    'Either boolean, positive number or "next" expected',
+    'Defaulting to "true"',
+  })
+
+  return nil
+end
+
+---@param filetype_name string
+---@param use_ftmatch? boolean Use vim.filetype.match to detect filetype
+function Config:detect_filetype(filetype_name, use_ftmatch)
+  local name = filetype_name:lower()
+
+  if not self._ft_map then
+    self._ft_map = {}
+  end
+
+  if self._ft_map[name] then
+    return self._ft_map[name]
+  end
+
+  local filetype = self:_get_filetype_name(name)
+
+  if use_ftmatch then
+    local filename = '__org__detect_filetype__.' .. filetype
+    local ft = vim.filetype.match({ filename = filename })
+    if ft then
+      self._ft_map[name] = ft
+      return ft
+    end
+  end
+
+  self._ft_map[name] = filetype
+  return filetype
+end
+
+---@private
+---@param filetype string
+function Config:_get_filetype_name(filetype)
+  local map = {
+    ['emacs-lisp'] = 'lisp',
+    elisp = 'lisp',
+    js = 'javascript',
+    ts = 'typescript',
+    md = 'markdown',
+    ex = 'elixir',
+    pl = 'perl',
+    sh = 'bash',
+    shell = 'bash',
+    uxn = 'uxntal',
+  }
+  if map[filetype] then
+    return map[filetype]
+  end
+
+  if self.opts.org_edit_src_filetype_map[filetype] then
+    return self.opts.org_edit_src_filetype_map[filetype]
+  end
+
+  return filetype
 end
 
 ---@type OrgConfig

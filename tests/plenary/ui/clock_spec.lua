@@ -1,6 +1,8 @@
 local helpers = require('tests.plenary.helpers')
 local Date = require('orgmode.objects.date')
 local orgmode = require('orgmode')
+local EventManager = require('orgmode.events')
+local events = EventManager.event
 
 describe('Clock', function()
   local files = {}
@@ -17,9 +19,9 @@ describe('Clock', function()
     })
     table.insert(files, first_file.filename)
     vim.fn.cursor(3, 1)
+    local now = Date.now({ active = false }):to_wrapped_string()
     vim.cmd([[norm ,oxi]])
     vim.wait(100)
-    local now = Date.now({ active = false }):to_wrapped_string()
     assert.are.same('  :LOGBOOK:', vim.fn.getline(5))
     assert.are.same(string.format('  CLOCK: %s', now), vim.fn.getline(6))
     assert.are.same('  :END:', vim.fn.getline(7))
@@ -51,9 +53,9 @@ describe('Clock', function()
     table.insert(files, second_file.filename)
 
     vim.fn.cursor(3, 1)
+    local now = Date.now({ active = false }):to_wrapped_string()
     vim.cmd([[norm ,oxi]])
     vim.wait(100) -- wait for promise to fulfill
-    local now = Date.now({ active = false }):to_wrapped_string()
     assert.are.same('  :LOGBOOK:', vim.fn.getline(8))
     assert.are.same(string.format('  CLOCK: %s', now), vim.fn.getline(9))
     assert.are.same('  :END:', vim.fn.getline(10))
@@ -86,9 +88,9 @@ describe('Clock', function()
 
     table.insert(files, third_file.filename)
     vim.fn.cursor(3, 1)
+    local now = Date.now({ active = false }):to_wrapped_string()
     vim.cmd([[norm ,oxi]])
     vim.wait(100) -- wait for promise to fulfill
-    local now = Date.now({ active = false }):to_wrapped_string()
     assert.are.same('  :LOGBOOK:', vim.fn.getline(5))
     assert.are.same(string.format('  CLOCK: %s', now), vim.fn.getline(6))
     assert.are.same('  :END:', vim.fn.getline(7))
@@ -115,9 +117,9 @@ describe('Clock', function()
     vim.cmd.edit(files[1])
     local old_clock_line = vim.fn.getline(6)
     vim.fn.cursor(3, 1)
+    local now = Date.now({ active = false }):to_wrapped_string()
     vim.cmd([[norm ,oxi]])
     vim.wait(100) -- wait for promise to fulfill
-    local now = Date.now({ active = false }):to_wrapped_string()
     assert.are.same('  :LOGBOOK:', vim.fn.getline(5))
     assert.are.same(string.format('  CLOCK: %s', now), vim.fn.getline(6))
     assert.are.same(old_clock_line, vim.fn.getline(7))
@@ -138,9 +140,9 @@ describe('Clock', function()
       '  DEADLINE: <2021-07-21 Wed 22:02>',
     })
     vim.fn.cursor(3, 1)
+    local now = Date.now({ active = false }):to_wrapped_string()
     vim.cmd([[norm ,oxi]])
     vim.wait(100) -- wait for promise to fulfill
-    local now = Date.now({ active = false }):to_wrapped_string()
     assert.are.same('  :LOGBOOK:', vim.fn.getline(5))
     assert.are.same(string.format('  CLOCK: %s', now), vim.fn.getline(6))
     assert.are.same('  :END:', vim.fn.getline(7))
@@ -184,5 +186,121 @@ describe('Clock', function()
     -- Test 1 is properly clocked out
     assert.are.same('Test 1', file:get_headlines()[2]:get_title())
     assert.is_false(file:get_headlines()[2]:is_clocked_in())
+  end)
+
+  it('should clock out and entry when its marked as done', function()
+    local file = helpers.create_agenda_file({
+      '* TODO Test 1',
+      '  Content',
+      '* TODO Test 2',
+      '  :LOGBOOK:',
+      '  CLOCK: ' .. Date.now():to_wrapped_string(false),
+      '  :END:',
+      '* TODO Test 3',
+    })
+
+    vim.cmd('edit ' .. file.filename)
+    vim.fn.cursor({ 3, 1 })
+    vim.cmd([[norm cit]])
+    assert.are.same({
+      '* TODO Test 1',
+      '  Content',
+      '* DONE Test 2',
+      '  CLOSED: ' .. Date.now():to_wrapped_string(false),
+      '  :LOGBOOK:',
+      '  CLOCK: ' .. Date.now():to_wrapped_string(false) .. '--' .. Date.now():to_wrapped_string(false) .. ' => 0:00',
+      '  :END:',
+      '* TODO Test 3',
+    }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
+  end)
+
+  it('should dispatch ClockedIn event when clocking in', function()
+    local file = helpers.create_agenda_file({
+      '* TODO Clock event test',
+    })
+
+    local received_event = nil
+    local listener = function(event)
+      received_event = event
+    end
+    EventManager.listen(events.ClockedIn, listener)
+
+    vim.cmd('edit ' .. file.filename)
+    vim.fn.cursor({ 1, 1 })
+    vim.cmd([[norm ,oxi]])
+    vim.wait(100)
+
+    assert.is_not_nil(received_event)
+    assert.are.same('orgmode.clocked_in', received_event.type)
+    assert.are.same('Clock event test', received_event.headline:get_title())
+
+    -- cleanup listener
+    local listeners = EventManager._listeners[events.ClockedIn.type]
+    for i, l in ipairs(listeners) do
+      if l == listener then
+        table.remove(listeners, i)
+        break
+      end
+    end
+  end)
+
+  it('should dispatch ClockedOut event when clocking out', function()
+    local file = helpers.create_agenda_file({
+      '* TODO Clock out event test',
+    })
+
+    vim.cmd('edit ' .. file.filename)
+    vim.fn.cursor({ 1, 1 })
+    vim.cmd([[norm ,oxi]])
+    vim.wait(100)
+
+    local received_event = nil
+    local listener = function(event)
+      received_event = event
+    end
+    EventManager.listen(events.ClockedOut, listener)
+
+    vim.fn.cursor({ 1, 1 })
+    vim.cmd([[norm ,oxo]])
+
+    assert.is_not_nil(received_event)
+    assert.are.same('orgmode.clocked_out', received_event.type)
+    assert.are.same('Clock out event test', received_event.headline:get_title())
+
+    -- cleanup listener
+    local listeners = EventManager._listeners[events.ClockedOut.type]
+    for i, l in ipairs(listeners) do
+      if l == listener then
+        table.remove(listeners, i)
+        break
+      end
+    end
+  end)
+
+  it('should not dispatch ClockedOut event when headline has no logbook', function()
+    local file = helpers.create_agenda_file({
+      '* TODO No logbook headline',
+    })
+
+    local received_event = nil
+    local listener = function(event)
+      received_event = event
+    end
+    EventManager.listen(events.ClockedOut, listener)
+
+    vim.cmd('edit ' .. file.filename)
+    local headline = file:get_headlines()[1]
+    headline:clock_out()
+
+    assert.is_nil(received_event)
+
+    -- cleanup listener
+    local listeners = EventManager._listeners[events.ClockedOut.type]
+    for i, l in ipairs(listeners) do
+      if l == listener then
+        table.remove(listeners, i)
+        break
+      end
+    end
   end)
 end)

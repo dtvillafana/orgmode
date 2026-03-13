@@ -1,5 +1,3 @@
-local utils = require('orgmode.utils')
-
 ---@class OrgLinkHttp:OrgLinkType
 ---@field private files OrgFiles
 local OrgLinkHttp = {}
@@ -26,17 +24,7 @@ function OrgLinkHttp:follow(link)
     return false
   end
 
-  if vim.ui['open'] then
-    vim.ui.open(url)
-    return true
-  end
-
-  if not vim.g.loaded_netrwPlugin then
-    utils.echo_warning('Netrw plugin must be loaded in order to open urls.')
-    return false
-  end
-
-  vim.fn['netrw#BrowseX'](url, vim.fn['netrw#CheckIfRemote']())
+  vim.ui.open(url)
   return true
 end
 
@@ -49,7 +37,7 @@ end
 ---@param link string
 ---@return string | nil
 function OrgLinkHttp:_parse(link)
-  local is_url = link:match('^https?://(.+)$')
+  local is_url = link:match('^https?:.+$')
   if is_url then
     return link
   end

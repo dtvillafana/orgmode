@@ -2,6 +2,8 @@ local Date = require('orgmode.objects.date')
 local config = require('orgmode.config')
 local utils = require('orgmode.utils')
 local NotificationPopup = require('orgmode.notifications.notification_popup')
+local current_file_path = string.sub(debug.getinfo(1, 'S').source, 2)
+local root_path = vim.fn.fnamemodify(current_file_path, ':p:h:h:h:h')
 
 ---@class OrgNotifications
 ---@field timer table
@@ -21,8 +23,8 @@ end
 
 function Notifications:start_timer()
   self:stop_timer()
-  self.timer = vim.loop.new_timer()
-  self:notify(Date.now():start_of('minute'))
+  self.timer = vim.uv.new_timer()
+  self:notify(Date.now())
   self.timer:start(
     (60 - os.date('%S')) * 1000,
     60000,
@@ -51,7 +53,7 @@ function Notifications:notify(time)
   for _, task in ipairs(tasks) do
     utils.concat(result, {
       string.format('# %s (%s)', task.category, task.humanized_duration),
-      string.format('%s %s %s', string.rep('*', task.level), task.todo, task.title),
+      string.format('%s %s %s', string.rep('*', task.level), task.todo or '', task.title),
       string.format('%s: <%s>', task.type, task.time:to_string()),
     })
   end
@@ -62,7 +64,7 @@ function Notifications:notify(time)
 end
 
 function Notifications:cron()
-  local tasks = self:get_tasks(Date.now():start_of('minute'))
+  local tasks = self:get_tasks(Date.now())
   if type(config.notifications.cron_notifier) == 'function' then
     config.notifications.cron_notifier(tasks)
   else
@@ -75,15 +77,21 @@ end
 function Notifications:_cron_notifier(tasks)
   for _, task in ipairs(tasks) do
     local title = string.format('%s (%s)', task.category, task.humanized_duration)
-    local subtitle = string.format('%s %s %s', string.rep('*', task.level), task.todo, task.title)
+    local subtitle = string.format('%s %s %s', string.rep('*', task.level), task.todo or '', task.title)
     local date = string.format('%s: %s', task.type, task.time:to_string())
 
     if vim.fn.executable('notify-send') == 1 then
-      vim.loop.spawn('notify-send', { args = { string.format('%s\n%s\n%s', title, subtitle, date) } })
+      vim.system({
+        'notify-send',
+        ('--icon=%s/assets/nvim-orgmode-small.png'):format(root_path),
+        '--app-name=orgmode',
+        title,
+        string.format('%s\n%s', subtitle, date),
+      })
     end
 
     if vim.fn.executable('terminal-notifier') == 1 then
-      vim.loop.spawn('terminal-notifier', { args = { '-title', title, '-subtitle', subtitle, '-message', date } })
+      vim.system({ 'terminal-notifier', '-title', title, '-subtitle', subtitle, '-message', date })
     end
   end
 end
@@ -125,7 +133,7 @@ end
 ---@returns table|nil
 function Notifications:_check_reminders(date, time)
   local result = {}
-  local notifications = config.notifications
+  local notifications = config.notifications or {}
   if date:is_deadline() and not notifications.deadline_reminder then
     return result
   end
@@ -137,7 +145,7 @@ function Notifications:_check_reminders(date, time)
     local repeater_time = date:apply_repeater_until(time)
     local times = utils.ensure_array(notifications.repeater_reminder_time)
     local minutes = repeater_time:diff(time, 'minute')
-    if vim.tbl_contains(times, minutes) then
+    if not date:is_same(repeater_time) and vim.tbl_contains(times, minutes) then
       table.insert(result, {
         reminder_type = 'repeater',
         time = repeater_time:without_adjustments(),

@@ -52,9 +52,39 @@ function M.find_headline(node)
   return nil
 end
 
+-- walks the tree to find an item or headline
+---@param node TSNode | nil
+---@return TSNode | nil
+function M.find_item_or_headline(node)
+  if not node then
+    return nil
+  end
+
+  local node_type = node:type()
+  if node_type == 'headline' or node_type == 'listitem' then
+    return node
+  end
+
+  if node_type == 'list' then
+    -- Move right one character to pick up the current listitem
+    vim.cmd([[norm l]])
+    return M.find_item_or_headline(M.get_node_at_cursor())
+  end
+
+  if node_type == 'section' then
+    -- The headline is always the first child of a section
+    return node:field('headline')[1]
+  end
+  return M.find_item_or_headline(node:parent())
+end
+
+-- returns the nearest item or headline
+function M.closest_item_or_headline_node(cursor)
+  return M.find_item_or_headline(M.get_node_at_cursor(cursor))
+end
+
 -- returns the nearest headline
 function M.closest_headline_node(cursor)
-  M.parse_current_file()
   local node = M.get_node_at_cursor(cursor)
 
   if not node then
@@ -64,16 +94,22 @@ function M.closest_headline_node(cursor)
   return M.find_headline(node)
 end
 
+---@param node TSNode | nil
+---@param node_type string | string[]
 ---@return TSNode | nil
-function M.closest_node(node, type)
+function M.closest_node(node, node_type)
   if not node then
     return nil
   end
-  if node:type() == type then
-    return node
+  local types = type(node_type) == 'table' and node_type or { node_type }
+
+  for _, t in ipairs(types) do
+    if node:type() == t then
+      return node
+    end
   end
 
-  return M.closest_node(node:parent(), type)
+  return M.closest_node(node:parent(), types)
 end
 
 ---@param node? TSNode
@@ -111,6 +147,23 @@ function M.parents_until(node, type)
     end
     parent = parent:parent()
   end
+end
+
+---@param node TSNode
+---@param drawer string
+---@param source? number|string
+---@return boolean
+function M.is_date_in_drawer(node, drawer, source)
+  if
+    (node:parent() and node:parent():type() == 'contents')
+    and (node:parent():parent() and node:parent():parent():type() == 'drawer')
+  then
+    local drawer_node = node:parent():parent() --[[@as TSNode]]
+    local drawer_name = vim.treesitter.get_node_text(drawer_node:field('name')[1], source or 0)
+    return drawer_name:lower() == drawer
+  end
+
+  return false
 end
 
 function M.node_to_lsp_range(node)

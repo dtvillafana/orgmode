@@ -3,6 +3,7 @@ local Date = require('orgmode.objects.date')
 local utils = require('orgmode.utils')
 local Calendar = require('orgmode.objects.calendar')
 local Promise = require('orgmode.utils.promise')
+local Input = require('orgmode.ui.input')
 
 local expansions = {
   ['%%f'] = function()
@@ -12,6 +13,9 @@ local expansions = {
     return vim.fn.expand('%:p')
   end,
   ['%%n'] = function()
+    if vim.fn.has('win32') == 1 then
+      return os.getenv('USERNAME')
+    end
     return os.getenv('USER')
   end,
   ['%%x'] = function()
@@ -22,51 +26,51 @@ local expansions = {
   end,
   ['%%%^t'] = function()
     return Calendar.new({ date = Date.today() }):open():next(function(date)
-      return date and string.format('<%s>', date:to_string()) or nil
+      return date and date:to_wrapped_string(true) or nil
     end)
   end,
   ['%%%^%{([^%}]*)%}t'] = function(title)
     return Calendar.new({ date = Date.today(), title = title }):open():next(function(date)
-      return date and string.format('<%s>', date:to_string()) or nil
+      return date and date:to_wrapped_string(true) or nil
     end)
   end,
   ['%%T'] = function()
-    return string.format('<%s>', Date.now():to_string())
+    return Date.now():to_wrapped_string(true)
   end,
   ['%%%^T'] = function()
     return Calendar.new({ date = Date.now() }):open():next(function(date)
-      return date and string.format('<%s>', date:to_string()) or nil
+      return date and date:to_wrapped_string(true) or nil
     end)
   end,
   ['%%%^%{([^%}]*)%}T'] = function(title)
     return Calendar.new({ date = Date.now(), title = title }):open():next(function(date)
-      return date and string.format('<%s>', date:to_string()) or nil
+      return date and date:to_wrapped_string(true) or nil
     end)
   end,
   ['%%u'] = function()
-    return string.format('[%s]', Date.today():to_string())
+    return Date.today():to_wrapped_string(false)
   end,
   ['%%%^u'] = function()
     return Calendar.new({ date = Date.today() }):open():next(function(date)
-      return date and string.format('[%s]', date:to_string()) or nil
+      return date and date:to_wrapped_string(false) or nil
     end)
   end,
   ['%%%^%{([^%}]*)%}u'] = function(title)
     return Calendar.new({ date = Date.today(), title = title }):open():next(function(date)
-      return date and string.format('[%s]', date:to_string()) or nil
+      return date and date:to_wrapped_string(false) or nil
     end)
   end,
   ['%%U'] = function()
-    return string.format('[%s]', Date.now():to_string())
+    return Date.now():to_wrapped_string(false)
   end,
   ['%%%^U'] = function()
     return Calendar.new({ date = Date.now() }):open():next(function(date)
-      return date and string.format('[%s]', date:to_string()) or nil
+      return date and date:to_wrapped_string(false) or nil
     end)
   end,
   ['%%%^%{([^%}]*)%}U'] = function(title)
     return Calendar.new({ date = Date.now(), title = title }):open():next(function(date)
-      return date and string.format('[%s]', date:to_string()) or nil
+      return date and date:to_wrapped_string(false) or nil
     end)
   end,
   ['%%a'] = function()
@@ -94,17 +98,15 @@ local Template = {}
 function Template:new(opts)
   opts = opts or {}
 
-  vim.validate({
-    description = { opts.description, 'string', true },
-    template = { opts.template, { 'string', 'table' }, true },
-    target = { opts.target, 'string', true },
-    regexp = { opts.regexp, 'string', true },
-    headline = { opts.headline, 'string', true },
-    properties = { opts.properties, 'table', true },
-    subtemplates = { opts.subtemplates, 'table', true },
-    datetree = { opts.datetree, { 'boolean', 'table' }, true },
-    whole_file = { opts.whole_file, 'boolean', true },
-  })
+  vim.validate('description', opts.description, 'string', true)
+  vim.validate('template', opts.template, { 'string', 'table' }, true)
+  vim.validate('target', opts.target, 'string', true)
+  vim.validate('regexp', opts.regexp, 'string', true)
+  vim.validate('headline', opts.headline, 'string', true)
+  vim.validate('properties', opts.properties, 'table', true)
+  vim.validate('subtemplates', opts.subtemplates, 'table', true)
+  vim.validate('datetree', opts.datetree, { 'boolean', 'table' }, true)
+  vim.validate('whole_file', opts.whole_file, 'boolean', true)
 
   local this = {}
   this.description = opts.description or ''
@@ -218,7 +220,7 @@ function Template:get_datetree_opts()
   ---@diagnostic disable-next-line: param-type-mismatch
   local datetree = vim.deepcopy(self.datetree)
   datetree = (type(datetree) == 'table' and datetree) or {}
-  datetree.date = datetree.date or Date.today()
+  datetree.date = datetree.date or Date.now()
   datetree.tree_type = datetree.tree_type or 'day'
   return datetree
 end
@@ -352,34 +354,48 @@ function Template:_compile_dates(content)
 end
 
 ---@param content string
----@return string
+---@return OrgPromise<string>
 function Template:_compile_prompts(content)
+  local prepared_inputs = {}
   for exp in content:gmatch('%%%^%b{}') do
     local details = exp:match('%{(.*)%}')
     local parts = vim.split(details, '|')
     local title, default = parts[1], parts[2]
-    local response
+    local input = {
+      fallback_value = default,
+      exp = exp,
+    }
     if #parts > 2 then
-      local completion_items = vim.list_slice(parts, 3, #parts)
-      local prompt = string.format('%s [%s]: ', title, default)
-      response = vim.fn.OrgmodeInput(prompt, '', function(arg_lead)
-        return vim.tbl_filter(function(v)
-          return v:match('^' .. vim.pesc(arg_lead))
-        end, completion_items)
-      end)
+      input.prompt = string.format('%s [%s]: ', title, default)
+      input.completion = function()
+        local completion_items = vim.list_slice(parts, 3, #parts)
+        return function(arg_lead)
+          return vim.tbl_filter(function(v)
+            return v:match('^' .. vim.pesc(arg_lead))
+          end, completion_items)
+        end
+      end
     else
-      local prompt = default and string.format('%s [%s]:', title, default) or title .. ': '
-      response = vim.trim(vim.fn.input({
-        prompt = prompt,
-        cancelreturn = default or '',
-      }))
+      input.prompt = default and string.format('%s [%s]:', title, default) or title .. ': '
     end
-    if #response == 0 and default then
-      response = default
-    end
-    content = content:gsub(vim.pesc(exp), response)
+    table.insert(prepared_inputs, input)
   end
-  return content
+
+  if #prepared_inputs == 0 then
+    return Promise.resolve(content)
+  end
+
+  return Promise.mapSeries(function(prepared_input)
+    return Input.open(prepared_input.prompt, '', prepared_input.completion and prepared_input.completion() or nil)
+      :next(function(response)
+        if not response or #response == 0 then
+          response = prepared_input.fallback_value
+        end
+        content = content:gsub(vim.pesc(prepared_input.exp), response)
+      end)
+  end, prepared_inputs):next(function()
+    return content
+  end)
 end
 
 function Template:_compile_expressions(content)

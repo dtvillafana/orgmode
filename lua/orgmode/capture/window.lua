@@ -1,14 +1,16 @@
 local config = require('orgmode.config')
 local utils = require('orgmode.utils')
 local Promise = require('orgmode.utils.promise')
+local id_counter = 0
 
 ---@class OrgCaptureWindowOpts
 ---@field template OrgCaptureTemplate
 ---@field on_open? fun(self: OrgCaptureWindow)
 ---@field on_finish? fun(lines: string[]): string[] | nil
----@field on_close? fun()
+---@field on_close? fun(self: OrgCaptureWindow)
 
 ---@class OrgCaptureWindow :OrgCaptureWindowOpts
+---@field id number
 ---@field private _window fun() | nil
 ---@field private _bufnr number
 local CaptureWindow = {}
@@ -22,6 +24,8 @@ function CaptureWindow:new(opts)
     on_finish = opts.on_finish,
     on_close = opts.on_close,
   }
+  data.id = id_counter
+  id_counter = id_counter + 1
   return setmetatable(data, CaptureWindow)
 end
 
@@ -34,10 +38,11 @@ function CaptureWindow:open()
     if not content then
       return utils.echo_info('Canceled.')
     end
-    self._window = utils.open_tmp_org_window(16, config.win_split_mode, config.win_border, self.on_close)
+    self._window = utils.open_tmp_org_window(16, config.win_split_mode, config.win_border, self:_on_close())
     vim.api.nvim_buf_set_lines(0, 0, -1, true, content)
     self.template:setup()
     vim.b.org_capture = true
+    vim.b.org_capture_window_id = self.id
     self._bufnr = vim.api.nvim_get_current_buf()
 
     if self.on_open then
@@ -48,6 +53,15 @@ function CaptureWindow:open()
       self._resolve_fn = resolve
     end)
   end)
+end
+
+function CaptureWindow:_on_close()
+  if not self.on_close then
+    return nil
+  end
+  return function()
+    self.on_close(self)
+  end
 end
 
 function CaptureWindow:finish()
@@ -69,6 +83,16 @@ function CaptureWindow:focus()
     end
   end
   return self
+end
+
+---@return boolean
+function CaptureWindow:is_modified()
+  return vim.bo[self._bufnr].modified
+end
+
+---@return number
+function CaptureWindow:get_bufnr()
+  return self._bufnr
 end
 
 function CaptureWindow:kill()

@@ -5,26 +5,24 @@ end
 vim.b.did_ftplugin = true
 
 local config = require('orgmode.config')
-local utils = require('orgmode.utils')
-
-vim.b.org_bufnr = vim.api.nvim_get_current_buf()
 
 vim.treesitter.start()
 
-config:setup_mappings('org', vim.b.org_bufnr)
-config:setup_mappings('text_objects', vim.b.org_bufnr)
+local bufnr = vim.api.nvim_get_current_buf()
+
+config:setup_mappings('org', bufnr)
+config:setup_mappings('text_objects', bufnr)
 config:setup_foldlevel()
 
 if config.org_startup_indented then
-  vim.b.org_indent_mode = true
+  require('orgmode.ui.virtual_indent'):new(bufnr):attach()
 end
-require('orgmode.org.indent').setup_virtual_indent()
 
 vim.bo.modeline = false
 vim.opt_local.fillchars:append('fold: ')
 vim.opt_local.foldmethod = 'expr'
-vim.opt_local.foldexpr = 'v:lua.require("orgmode.org.fold").foldexpr()'
-if utils.has_version_10() and config.ui.folds.colored then
+vim.opt_local.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+if config.ui.folds.colored then
   vim.opt_local.foldtext = ''
 else
   vim.opt_local.foldtext = 'v:lua.require("orgmode.org.indent").foldtext()'
@@ -32,6 +30,7 @@ end
 vim.opt_local.formatexpr = 'v:lua.require("orgmode.org.format")()'
 vim.opt_local.omnifunc = 'v:lua.orgmode.omnifunc'
 vim.opt_local.commentstring = '# %s'
+vim.bo.indentkeys = ('%s,%s'):format(vim.bo.indentkeys, '=~end_src,=~end_example,<:>')
 
 _G.orgmode.omnifunc = function(findstart, base)
   return require('orgmode').completion:omnifunc(findstart, base)
@@ -55,6 +54,10 @@ for _, char in ipairs({ '*', '=', '/', '+', '~', '_' }) do
   vim.keymap.set('o', 'a' .. char, ':normal va' .. char .. '<CR>', { buffer = true })
 end
 
+if config.org_highlight_latex_and_related then
+  vim.bo[bufnr].syntax = 'ON'
+end
+
 vim.b.undo_ftplugin = table.concat({
   'setlocal',
   'commentstring<',
@@ -65,5 +68,12 @@ vim.b.undo_ftplugin = table.concat({
   'foldexpr<',
   'formatexpr<',
   'omnifunc<',
-  '| unlet! b:org_bufnr b:org_tmp_edit_window',
+  'indentkeys<',
+  '| unlet! b:org_tmp_edit_window',
 }, ' ')
+
+-- Manually attach Snacks.image module to ensure that images are shown.
+-- Snacks usually handles this automatically, but if Orgmode plugin is loaded after Snacks, it will not pick it up.
+if vim.tbl_get(_G, 'Snacks', 'image', 'config', 'enabled') and vim.tbl_get(_G, 'Snacks', 'image', 'config', 'doc', 'enabled') then
+  require('snacks.image.doc').attach(bufnr)
+end

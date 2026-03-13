@@ -59,9 +59,12 @@ PropertyStringMatch.__index = PropertyStringMatch
 local PropertyNumberMatch = {}
 PropertyNumberMatch.__index = PropertyNumberMatch
 
+---@class OrgTodoMatchAndItem
+---@field operator string
+---@field value string
+
 ---@class OrgTodoMatch
----@field anyOf string[]
----@field noneOf string[]
+---@field orItems OrgTodoMatchAndItem[][]
 local TodoMatch = {}
 TodoMatch.__index = TodoMatch
 
@@ -339,7 +342,7 @@ end
 ---@return OrgTagMatch?, string
 function TagMatch:parse(input)
   local tag
-  tag, input = parse_pattern(input, '[%w_@#%%]+')
+  tag, input = parse_pattern(input, '[\128-\255%w_%%@#]+')
   if not tag then
     return nil, input
   end
@@ -371,7 +374,7 @@ function PropertyMatch:parse(input)
   local name, operator, string_str, number_str, date_str
   local original_input = input
 
-  name, input = parse_pattern(input, '[^=<>]+')
+  name, input = parse_pattern(input, '([^%-%+=<>&]+)[=<>]+')
   if not name then
     return nil, original_input
   end
@@ -390,8 +393,9 @@ function PropertyMatch:parse(input)
   end
 
   -- Date property
-  date_str, input = parse_pattern(input, '"(<[^>]+>)"')
+  date_str, input = parse_pattern(input, '"<[^>]+>"')
   if date_str then
+    date_str = date_str:sub(2, -2)
     ---@type string?, OrgDate?
     local date_content, date_value
     if date_str == '<today>' then
@@ -402,12 +406,12 @@ function PropertyMatch:parse(input)
       -- Parse relative formats (e.g. <+1d>) as well as absolute
       date_content = date_str:match('^<([%+%-]%d+[dmyhwM])>$')
       if date_content then
-        date_value = Date.now()
+        date_value = Date.today()
         date_value = date_value:adjust(date_content)
       else
         date_content = date_str:match('^<([^>]+)>$')
         if date_content then
-          date_value = Date.from_string(date_str)
+          date_value = Date.from_string(date_content)
         end
       end
     end
@@ -540,10 +544,8 @@ end
 ---@private
 ---@return OrgTodoMatch
 function TodoMatch:_new()
-  ---@type OrgTodoMatch
   local todo_match = {
-    anyOf = {},
-    noneOf = {},
+    orItems = {},
   }
 
   setmetatable(todo_match, TodoMatch)
@@ -566,39 +568,43 @@ function TodoMatch:parse(input)
 
   -- Parse a whitelist of keywords
   --- @type string[]?
-  local anyOf
-  anyOf, input = parse_delimited_sequence(input, function(i)
-    return parse_pattern(i, '%w+')
-  end, '%|')
-  if anyOf and #anyOf > 0 then
-    -- Successfully parsed the whitelist, return it
-    local todo_match = TodoMatch:_new()
-    todo_match.anyOf = anyOf
-    return todo_match, input
-  end
+  local orItems
+  orItems, input = parse_delimited_sequence(input, function(i)
+    ---@type string?
+    local operator
+    operator, i = parse_pattern(i, '[%+%-]?')
 
-  -- Parse a blacklist of keywords
-  ---@type string?
-  local negation
-  negation, input = parse_pattern(input, '-')
-  if negation then
-    local negative_items
-    negative_items, input = parse_delimited_sequence(input, function(i)
-      return parse_pattern(i, '%w+')
-    end, '%-')
-
-    if negative_items then
-      if #negation > 0 then
-        local todo_match = TodoMatch:_new()
-        todo_match.noneOf = negative_items
-        return todo_match, input
-      else
-        return nil, original_input
-      end
+    if operator == '' then
+      operator = '+'
     end
+
+    local andItems = {}
+
+    while operator do
+      ---@type string?
+      local value
+      value, i = parse_pattern(i, '%w+')
+      if not value then
+        break
+      end
+      table.insert(andItems, {
+        operator = operator,
+        value = value,
+      })
+
+      operator, i = parse_pattern(i, '[%+%-]')
+    end
+
+    return andItems, i
+  end, '%|')
+
+  if not orItems or #orItems == 0 then
+    return nil, original_input
   end
 
-  return nil, original_input
+  local todo_match = TodoMatch:_new()
+  todo_match.orItems = orItems
+  return todo_match, input
 end
 
 ---@param item OrgSearchable
@@ -606,25 +612,24 @@ end
 function TodoMatch:match(item)
   local item_todo = item.todo
 
-  if #self.anyOf > 0 then
-    for _, todo_value in ipairs(self.anyOf) do
-      if item_todo == todo_value then
-        return true
+  for _, orItem in ipairs(self.orItems) do
+    local validItems = true
+    for _, andItem in ipairs(orItem) do
+      if andItem.operator == '-' and item_todo == andItem.value then
+        validItems = false
+        break
+      elseif andItem.operator == '+' and item_todo ~= andItem.value then
+        validItems = false
+        break
       end
     end
 
-    return false
-  elseif #self.noneOf > 0 then
-    for _, todo_value in ipairs(self.noneOf) do
-      if item_todo == todo_value then
-        return false
-      end
+    if validItems then
+      return true
     end
-
-    return true
-  else
-    return true
   end
+
+  return false
 end
 
 return Search

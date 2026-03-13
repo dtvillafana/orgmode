@@ -1,6 +1,7 @@
 ---@diagnostic disable: invisible
 local OrgHeadline = require('orgmode.api.headline')
 local org = require('orgmode')
+local Buffers = require('orgmode.state.buffers')
 
 ---@class OrgApiFile
 ---@field category string current file category name. By default it's only filename without extension unless defined differently via #+CATEGORY directive
@@ -93,6 +94,14 @@ function OrgFile:get_closest_headline(cursor)
   return nil
 end
 
+---@param line_number number
+---@return OrgApiHeadline | nil
+function OrgFile:get_headline_on_line(line_number)
+  return vim.tbl_filter(function(headline)
+    return headline.position.start_line == line_number
+  end, self.headlines)[1]
+end
+
 --- Get a link destination as string
 ---
 --- Depending if org_id_link_to_org_use_id is set the format is
@@ -105,7 +114,7 @@ end
 --- @return string
 function OrgFile:get_link()
   local filename = self.filename
-  local bufnr = vim.fn.bufnr(filename)
+  local bufnr = Buffers.get_buffer_by_filename(filename)
 
   if bufnr == -1 or not vim.api.nvim_buf_is_loaded(bufnr) then
     -- do remote edit

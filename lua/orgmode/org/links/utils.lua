@@ -1,24 +1,27 @@
 local utils = require('orgmode.utils')
 local link_utils = {}
 
----@param file OrgFile
----@return boolean
-function link_utils.goto_file(file)
-  vim.cmd(('edit %s'):format(file.filename))
+local external_filetypes = {
+  -- pdf is considered a valid filetype even though it cannot be correctly read
+  'pdf',
+}
+
+---@param filename string
+---@return boolean - if editable, returns true, otherwise false
+local function edit_file(filename)
+  local filetype = vim.filetype.match({ filename = filename })
+  if not filetype or vim.tbl_contains(external_filetypes, filetype) then
+    vim.ui.open(filename)
+    return false
+  end
+  vim.cmd(('edit %s'):format(filename))
   return true
 end
 
----@param headline OrgHeadline
+---@param file OrgFile
 ---@return boolean
-function link_utils.goto_headline(headline)
-  local current_file_path = utils.current_file_path()
-  if headline.file.filename ~= current_file_path then
-    vim.cmd(string.format('edit %s', headline.file.filename))
-  else
-    vim.cmd([[normal! m']]) -- add link source to jumplist
-  end
-  vim.fn.cursor({ headline:get_range().start_line, 1 })
-  vim.cmd([[normal! zv]])
+function link_utils.goto_file(file)
+  edit_file(file.filename)
   return true
 end
 
@@ -36,7 +39,8 @@ function link_utils.goto_oneof_headlines(headlines, file_path, error_message)
   end
 
   if #headlines == 1 then
-    return link_utils.goto_headline(headlines[1])
+    utils.goto_headline(headlines[1])
+    return true
   end
 
   local longest_headline = utils.reduce(headlines, function(acc, h)
@@ -55,7 +59,8 @@ function link_utils.goto_oneof_headlines(headlines, file_path, error_message)
     return true
   end
 
-  return link_utils.goto_headline(headlines[choice])
+  utils.goto_headline(headlines[choice])
+  return true
 end
 
 ---@param file_path string
@@ -66,7 +71,11 @@ function link_utils.open_file_and_search(file_path, search_text)
     return true
   end
   if file_path ~= utils.current_file_path() then
-    vim.cmd(('edit %s'):format(file_path))
+    local editable = edit_file(file_path)
+    -- Return without attempt to find text. File is not editable.
+    if not editable then
+      return true
+    end
   end
 
   if not search_text or search_text == '' then

@@ -62,8 +62,10 @@ local function get_indent_for_match(matches, linenr, mode, bufnr)
     end
     return indent
   end
-  if mode:match('^[iR]') and prev_line_match.type == 'listitem' and linenr - prev_linenr < 3 then
-    -- In insert mode, we also count the non-listitem line *after* a listitem as
+  -- node type is nil while inserting!
+  local is_inserting = (not match.type) or mode:match('^[iR]')
+  if is_inserting and prev_line_match.type == 'listitem' and linenr - prev_linenr < 3 then
+    -- While inserting, we also count the non-listitem line *after* a listitem as
     -- part of the listitem. Keep in mind that double empty lines end a list as
     -- per Orgmode syntax.
     --
@@ -212,11 +214,14 @@ local get_matches = ts_utils.memoize_by_buf_tick(function(bufnr)
       -- Only loop the content.
       for i = range.start.line + 1, range['end'].line - 2 do
         matches[i + 1] = vim.tbl_deep_extend('force', opts, {
-          indent = vim.fn.indent(i + 1) + content_indent_pad,
+          indent = vim.fn.indent(i + 1) + (content_indent_pad or 0),
         })
       end
     elseif type == 'paragraph' or type == 'drawer' or type == 'property_drawer' then
       opts.indent_type = 'other'
+      for i = range.start.line, range['end'].line - 1 do
+        matches[i + 1] = opts
+      end
     end
   end
 
@@ -254,9 +259,7 @@ local function indentexpr(linenr, bufnr)
   end
 
   local indentexpr_cache = buf_indentexpr_cache[bufnr] or { prev_linenr = -1 }
-  if indentexpr_cache.prev_linenr ~= linenr - 1 or not mode:lower():find('n') then
-    indentexpr_cache.matches = get_matches(bufnr)
-  end
+  indentexpr_cache.matches = get_matches(bufnr)
 
   -- Treesitter failed to parse the document (due to errors or missing tree)
   -- So we just fallback to autoindent
@@ -266,7 +269,35 @@ local function indentexpr(linenr, bufnr)
 
   local new_indent = get_indent_for_match(indentexpr_cache.matches, linenr, mode, bufnr)
   local match = indentexpr_cache.matches[linenr]
+
   if match then
+    -- Attempt to calculate indentation from the block filetype
+    if match.indent_type == 'block' and linenr > match.line_nr and linenr < match.line_end_nr then
+      local block_parameters = match.node:field('parameter')
+
+      if block_parameters and block_parameters[1] then
+        local block_ft = vim.treesitter.get_node_text(block_parameters[1], bufnr)
+
+        if block_ft and block_ft ~= vim.bo.filetype then
+          local curr_indentexpr = vim.filetype.get_option(block_ft, 'indentexpr') --[[@as string]]
+
+          if curr_indentexpr and curr_indentexpr ~= '' then
+            curr_indentexpr = curr_indentexpr:gsub('%(%)$', '')
+
+            local buf_shiftwidth = vim.bo.shiftwidth
+            vim.bo.shiftwidth = vim.filetype.get_option(block_ft, 'shiftwidth')
+            local ok, block_ft_indent = pcall(function()
+              return vim.fn[curr_indentexpr]()
+            end)
+            if ok then
+              new_indent = math.max(block_ft_indent, vim.fn.indent(match.line_nr))
+            end
+
+            vim.bo.shiftwidth = buf_shiftwidth
+          end
+        end
+      end
+    end
     match.indent = new_indent
   end
   indentexpr_cache.prev_linenr = linenr
@@ -294,22 +325,7 @@ local function foldtext()
   return line .. config.org_ellipsis
 end
 
-local function setup_virtual_indent()
-  if not utils.has_version_10() then
-    return
-  end
-
-  local virtualIndent = VirtualIndent:new()
-
-  if config.org_startup_indented or vim.b.org_indent_mode then
-    return virtualIndent:attach()
-  end
-
-  return virtualIndent:start_watch_org_indent()
-end
-
 return {
-  setup_virtual_indent = setup_virtual_indent,
   indentexpr = indentexpr,
   foldtext = foldtext,
 }

@@ -17,52 +17,100 @@ local function get_date(date, name)
     return Date.from_string(date)
   end
 
-  error(('Invalid format for "%s" date in Org Agenda'):format(name))
+  error(('Invalid format for "%s" date in Org Agenda'):format(name), 0)
 end
 
----@class OrgApiAgendaOptions
+local function get_shared_opts(options)
+  options = options or {}
+  local opts = {}
+  if options.filters and options.filters ~= '' then
+    opts.filter = options.filters
+  end
+  opts.header = options.header
+  opts.agenda_files = options.org_agenda_files
+  opts.sorting_strategy = options.org_agenda_sorting_strategy
+  opts.tag_filter = options.org_agenda_tag_filter_preset
+  opts.category_filter = options.org_agenda_category_filter_preset
+  opts.remove_tags = options.org_agenda_remove_tags
+  return opts
+end
+
+local function get_tags_opts(options)
+  local opts = get_shared_opts(options)
+  opts.match_query = options.match_query
+  opts.todo_ignore_scheduled = options.org_agenda_todo_ignore_scheduled
+  opts.todo_ignore_deadlines = options.org_agenda_todo_ignore_deadlines
+  return opts
+end
+
+---@class OrgApiAgendaOpts
 ---@field filters? OrgApiAgendaFilter
+---@field header? string
+---@field org_agenda_files? string[]
+---@field org_agenda_tag_filter_preset? string
+---@field org_agenda_category_filter_preset? string
+---@field org_agenda_sorting_strategy? OrgAgendaSortingStrategy[]
+---@field org_agenda_remove_tags? boolean
+
+---@class OrgApiAgendaOptions:OrgApiAgendaOpts
 ---@field from? string | OrgDate
----@field span? number | 'day' | 'week' | 'month' | 'year'
+---@field span? OrgAgendaSpan
 
 ---@param options? OrgApiAgendaOptions
 function OrgAgenda.agenda(options)
   options = options or {}
-  if options.filters and options.filters ~= '' then
-    orgmode.agenda.filters:parse(options.filters, true)
-  end
-  local from = get_date(options.from, 'from')
-  orgmode.agenda:agenda({
-    from = from,
-    span = options.span,
-  })
+  local opts = get_shared_opts(options)
+  opts.from = get_date(options.from, 'from')
+  opts.span = options.span
+  orgmode.agenda:agenda(opts)
 end
 
----@class OrgAgendaTodosOptions
----@field filters? OrgApiAgendaFilter
+---@class OrgApiAgendaTodosOptions:OrgApiAgendaOpts
 
----@param options? OrgAgendaTodosOptions
+---@param options? OrgApiAgendaTodosOptions
 function OrgAgenda.todos(options)
   options = options or {}
-  if options.filters and options.filters ~= '' then
-    orgmode.agenda.filters:parse(options.filters, true)
-  end
-  orgmode.agenda:todos()
+  local opts = get_shared_opts(options)
+  orgmode.agenda:todos(opts)
 end
 
----@class OrgAgendaTagsOptions
----@field filters? OrgApiAgendaFilter
+---@class OrgApiAgendaTagsTodoOptions:OrgApiAgendaOpts
+---@field match_query? string Match query to find the todos
+---@field org_agenda_todo_ignore_scheduled? OrgAgendaTodoIgnoreScheduledTypes
+---@field org_agenda_todo_ignore_deadlines? OrgAgendaTodoIgnoreDeadlinesTypes
+
+---@param options? OrgApiAgendaTagsOptions
+function OrgAgenda.tags_todo(options)
+  options = options or {}
+  local opts = get_tags_opts(options)
+  orgmode.agenda:tags_todo(opts)
+end
+
+---@class OrgApiAgendaTagsOptions:OrgApiAgendaTagsTodoOptions
 ---@field todo_only? boolean
 
----@param options? OrgAgendaTagsOptions
+---@param options? OrgApiAgendaTagsOptions
 function OrgAgenda.tags(options)
   options = options or {}
-  if options.filters and options.filters ~= '' then
-    orgmode.agenda.filters:parse(options.filters, true)
+  local opts = get_tags_opts(options)
+  opts.todo_only = options.todo_only
+  orgmode.agenda:tags(opts)
+end
+
+---@param key string Key in the agenda prompt (for example: "a", "t", "m", "M")
+function OrgAgenda.open_by_key(key)
+  return orgmode.agenda:open_by_key(key)
+end
+
+---Get the headline at the cursor position in the agenda view
+---@return OrgApiHeadline | nil
+function OrgAgenda.get_headline_at_cursor()
+  local headline = orgmode.agenda:get_headline_at_cursor()
+
+  if headline then
+    local file = require('orgmode.api').load(headline.file.filename)
+    return file:get_headline_on_line(headline:get_range().start_line)
   end
-  orgmode.agenda:tags({
-    todo_only = options.todo_only,
-  })
 end
 
 return OrgAgenda

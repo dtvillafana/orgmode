@@ -49,7 +49,7 @@ return {
     ),
     org_agenda_redo = m.action(
       'agenda.redo',
-      { opts = { desc = 'org redo', help_desc = 'Reload org files and redraw' } }
+      { args = { 'mapping' }, opts = { desc = 'org redo', help_desc = 'Reload org files and redraw' } }
     ),
     org_agenda_todo = m.action(
       'agenda.change_todo_state',
@@ -117,10 +117,20 @@ return {
         help_desc = 'Open prompt that allows filtering by category, tags and title(vim regex)',
       },
     }),
+    org_agenda_open_at_point = m.action(
+      'agenda.open_at_point',
+      { opts = { desc = 'org open', help_desc = 'Open hyperlink under cursor' } }
+    ),
     org_agenda_refile = m.action('agenda.refile', {
       opts = {
         desc = 'org refile',
         help_desc = 'Refile headline to specific destination',
+      },
+    }),
+    org_agenda_preview = m.action('agenda.preview_item', {
+      opts = {
+        desc = 'org preview',
+        help_desc = 'Preview agenda item in floating window',
       },
     }),
     org_agenda_add_note = m.action(
@@ -319,10 +329,13 @@ return {
       args = { true },
       opts = { desc = 'org timestamp (inactive)', help_desc = 'Insert/Update inactive date under cursor' },
     }),
-    org_insert_link = m.action(
-      'org_mappings.insert_link',
-      { opts = { desc = 'org insert link', help_desc = 'Insert a hyperlink' } }
-    ),
+    org_insert_link = m.action('org_mappings.insert_link', {
+      modes = { 'n', 'x' },
+      opts = {
+        desc = 'org insert link',
+        help_desc = 'Insert or Update a hyperlink under cursor. Visual selection used as description',
+      },
+    }),
     org_store_link = m.action(
       'org_mappings.store_link',
       { opts = { desc = 'org store link', help_desc = 'Store link to current headline' } }
@@ -372,6 +385,15 @@ return {
     org_edit_src_save = m.custom(
       [[<Cmd>lua require('orgmode.objects.edit_special'):new():write()<CR>]],
       { opts = { desc = 'org save', help_desc = 'Apply changes from the special buffer to the source Org buffer' } }
+    ),
+    org_edit_src_save_exit = m.custom(
+      [[<Cmd>lua require('orgmode.objects.edit_special'):new():write_end_exit()<CR>]],
+      {
+        opts = {
+          desc = 'org save and exit',
+          help_desc = 'Apply changes from the special buffer to the source Org buffer and exit',
+        },
+      }
     ),
   },
   text_objects = {

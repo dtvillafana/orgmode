@@ -5,6 +5,7 @@ local Date = require('orgmode.objects.date')
 local Calendar = require('orgmode.objects.calendar')
 local Promise = require('orgmode.utils.promise')
 local org = require('orgmode')
+local Buffers = require('orgmode.state.buffers')
 
 ---@class OrgApiHeadline
 ---@field title string headline title without todo keyword, tags and priority. Ex. `* TODO I am a headline  :SOMETAG:` returns `I am a headline`
@@ -64,7 +65,7 @@ end
 ---@private
 function OrgHeadline._build_from_internal_headline(section, index)
   local todo, _, type = section:get_todo()
-  local properties = section:get_properties()
+  local properties = section:get_own_properties()
   return OrgHeadline:_new({
     title = section:get_title(),
     line = section:get_headline_line_content(),
@@ -171,14 +172,14 @@ function OrgHeadline:set_deadline(date)
       if date_instance then
         return headline:set_deadline_date(date_instance)
       end
-      error('Invalid string format for deadline date')
+      error('Invalid string format for deadline date', 0)
     end
 
     if Date.is_date_instance(date) then
       return headline:set_deadline_date(date)
     end
 
-    error('Invalid argument to set_deadline')
+    error('Invalid argument to set_deadline', 0)
   end)
 end
 
@@ -211,14 +212,14 @@ function OrgHeadline:set_scheduled(date)
       if date_instance then
         return headline:set_scheduled_date(date_instance)
       end
-      error('Invalid string format for schedule date')
+      error('Invalid string format for schedule date', 0)
     end
 
     if Date.is_date_instance(date) then
       return headline:set_scheduled_date(date)
     end
 
-    error('Invalid argument to set_scheduled')
+    error('Invalid argument to set_scheduled', 0)
   end)
 end
 
@@ -276,7 +277,7 @@ end
 --- @return string
 function OrgHeadline:get_link()
   local filename = self.file.filename
-  local bufnr = vim.fn.bufnr(filename)
+  local bufnr = Buffers.get_buffer_by_filename(filename)
 
   if bufnr == -1 or not vim.api.nvim_buf_is_loaded(bufnr) then
     -- do remote edit

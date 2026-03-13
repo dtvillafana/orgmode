@@ -29,10 +29,7 @@ OrgApi.refile({opts})                                            *OrgApi.refile*
     If executed from capture buffer, it will close the capture buffer
 
     Parameters: ~
-        {opts}  (OrgApiRefileOpts)
-
-    Returns: ~
-        (boolean)
+        {opts}  (OrgApiRefileOpts)  @return OrgPromise<boolean>
 
 
 OrgApi.insert_link()                                        *OrgApi.insert_link*
@@ -44,7 +41,7 @@ OrgApi.insert_link()                                        *OrgApi.insert_link*
      If <in_file_location> is *<headline>, <headline> is used as prefilled description for the link.
      If <protocol> is id, this format can also be used to pass a prefilled description.
      @param link_location string
-     @return boolean
+     @return OrgPromise<boolean>
 
 
 OrgApiFile                                                          *OrgApiFile*
@@ -68,6 +65,16 @@ OrgFile:get_closest_headline()                    *OrgFile:get_closest_headline*
      If cursor is not provided, it will use current cursor position
      @param cursor? { line: number, col: number } (1, 0)-indexed cursor position, same as returned from `vim.api.nvim_win_get_cursor(0)`
      @return OrgApiHeadline | nil
+
+
+                                                  *OrgFile:get_headline_on_line*
+OrgFile:get_headline_on_line({line_number})
+
+    Parameters: ~
+        {line_number}  (number)
+
+    Returns: ~
+        (OrgApiHeadline|nil)
 
 
 OrgFile:get_link()                                            *OrgFile:get_link*
@@ -213,12 +220,23 @@ OrgApiAgendaFilter                                          *OrgApiAgendaFilter*
         string
 
 
-OrgApiAgendaOptions                                        *OrgApiAgendaOptions*
+OrgApiAgendaOpts                                              *OrgApiAgendaOpts*
 
     Fields: ~
-        {filters?}  (OrgApiAgendaFilter)
-        {from?}     (string|OrgDate)
-        {span?}     (number|"day"|"week"|"month"|"year")
+        {filters?}                            (OrgApiAgendaFilter)
+        {header?}                             (string)
+        {org_agenda_files?}                   (string[])
+        {org_agenda_tag_filter_preset?}       (string)
+        {org_agenda_category_filter_preset?}  (string)
+        {org_agenda_sorting_strategy?}        (OrgAgendaSortingStrategy[])
+        {org_agenda_remove_tags?}             (boolean)
+
+
+OrgApiAgendaOptions : OrgApiAgendaOpts                     *OrgApiAgendaOptions*
+
+    Fields: ~
+        {from?}  (string|OrgDate)
+        {span?}  (OrgAgendaSpan)
 
 
 OrgAgenda.agenda({options?})                                  *OrgAgenda.agenda*
@@ -227,29 +245,55 @@ OrgAgenda.agenda({options?})                                  *OrgAgenda.agenda*
         {options?}  (OrgApiAgendaOptions)
 
 
-OrgAgendaTodosOptions                                    *OrgAgendaTodosOptions*
-
-    Fields: ~
-        {filters?}  (OrgApiAgendaFilter)
+                                                      *OrgApiAgendaTodosOptions*
+OrgApiAgendaTodosOptions : OrgApiAgendaOpts
 
 
 OrgAgenda.todos({options?})                                    *OrgAgenda.todos*
 
     Parameters: ~
-        {options?}  (OrgAgendaTodosOptions)
+        {options?}  (OrgApiAgendaTodosOptions)
 
 
-OrgAgendaTagsOptions                                      *OrgAgendaTagsOptions*
+                                                   *OrgApiAgendaTagsTodoOptions*
+OrgApiAgendaTagsTodoOptions : OrgApiAgendaOpts
 
     Fields: ~
-        {filters?}    (OrgApiAgendaFilter)
+        {match_query?}                       (string)                             Match query to find the todos
+        {org_agenda_todo_ignore_scheduled?}  (OrgAgendaTodoIgnoreScheduledTypes)
+        {org_agenda_todo_ignore_deadlines?}  (OrgAgendaTodoIgnoreDeadlinesTypes)
+
+
+OrgAgenda.tags_todo({options?})                            *OrgAgenda.tags_todo*
+
+    Parameters: ~
+        {options?}  (OrgApiAgendaTagsOptions)
+
+
+                                                       *OrgApiAgendaTagsOptions*
+OrgApiAgendaTagsOptions : OrgApiAgendaTagsTodoOptions
+
+    Fields: ~
         {todo_only?}  (boolean)
 
 
 OrgAgenda.tags({options?})                                      *OrgAgenda.tags*
 
     Parameters: ~
-        {options?}  (OrgAgendaTagsOptions)
+        {options?}  (OrgApiAgendaTagsOptions)
+
+
+OrgAgenda.open_by_key({key})                             *OrgAgenda.open_by_key*
+
+    Parameters: ~
+        {key}  (string)  Key in the agenda prompt (for example: "a", "t", "m", "M")
+
+
+OrgAgenda.get_headline_at_cursor()            *OrgAgenda.get_headline_at_cursor*
+    Get the headline at the cursor position in the agenda view
+
+    Returns: ~
+        (OrgApiHeadline|nil)
 
 
 OrgPosition                                                        *OrgPosition*

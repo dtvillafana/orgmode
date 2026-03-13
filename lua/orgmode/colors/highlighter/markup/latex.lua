@@ -1,8 +1,16 @@
-local ts_utils = require('orgmode.utils.treesitter')
-
 ---@class OrgLatexHighlighter : OrgMarkupHighlighter
 ---@field private markup OrgMarkupHighlighter
-local OrgLatex = {}
+local OrgLatex = {
+  valid_capture_names = {
+    ['latex.plain'] = true,
+    ['latex.bracket.start'] = true,
+    ['latex.bracket.end'] = true,
+    ['latex.curly.start'] = true,
+    ['latex.curly.end'] = true,
+    ['latex.square.start'] = true,
+    ['latex.square.end'] = true,
+  },
+}
 
 local latex_pairs = {
   ['('] = ')',
@@ -50,7 +58,10 @@ end
 
 ---@param node TSNode
 ---@return OrgMarkupNode | false
-function OrgLatex:parse_node(node)
+function OrgLatex:parse_node(node, name)
+  if not self.valid_capture_names[name] then
+    return false
+  end
   local node_type = node:type()
   if node_type ~= 'str' and not latex_pairs[node_type] then
     return false
@@ -102,6 +113,25 @@ function OrgLatex:highlight(highlights, bufnr)
       priority = 110 + entry.from.start_col,
     })
   end
+end
+
+---@param highlights OrgMarkupHighlight[]
+---@return OrgMarkupPreparedHighlight[]
+function OrgLatex:prepare_highlights(highlights)
+  local ephemeral = self.markup:use_ephemeral()
+  local extmarks = {}
+  for _, entry in ipairs(highlights) do
+    table.insert(extmarks, {
+      start_line = entry.from.line,
+      start_col = entry.from.start_col,
+      end_col = entry.to.end_col,
+      ephemeral = ephemeral,
+      hl_group = '@org.latex',
+      spell = false,
+      priority = 110 + entry.from.start_col,
+    })
+  end
+  return extmarks
 end
 
 return OrgLatex
