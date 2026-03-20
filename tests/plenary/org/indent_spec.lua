@@ -250,6 +250,38 @@ local function test_insertion_from_normal_mode()
   expect_whole_buffer(expected)
 end
 
+describe('source block indent delegation', function()
+  local augroup = 'org_test_block_indent'
+
+  after_each(function()
+    pcall(vim.api.nvim_del_augroup_by_name, augroup)
+  end)
+
+  it('evaluates a v:lua indentexpr for the block language', function()
+    vim.cmd([[
+      function! OrgTestBlockIndent()
+        return 7
+      endfunction
+    ]])
+    vim.api.nvim_create_autocmd('FileType', {
+      pattern = 'lua',
+      group = vim.api.nvim_create_augroup(augroup, { clear = true }),
+      callback = function(args)
+        -- The expression orgmode used to call via vim.fn[], which cannot run v:lua.
+        vim.bo[args.buf].indentexpr = 'v:lua.vim.fn.OrgTestBlockIndent()'
+      end,
+    })
+
+    helpers.create_file({
+      '#+BEGIN_SRC lua',
+      'x',
+      '#+END_SRC',
+    })
+
+    assert.are.equal(7, require('orgmode.org.indent').indentexpr(2))
+  end)
+end)
+
 -- The actual tests are here.
 
 describe('with "indent",', function()

@@ -244,6 +244,31 @@ end)
 -- content which requires us to get the updated matches for the changed content.
 --
 -- TLDR: The caching avoids some inconsistent race conditions with getting the Treesitter matches.
+
+---Evaluate a filetype 'indentexpr' for linenr.
+---Vim stores this as an expression (`GetJSONIndent(v:lnum)`,
+---`nvim_treesitter#indent()`, or `v:lua.require'nvim-treesitter'.indentexpr()`).
+---Evaluating that expression is how source-block indentation is delegated.
+---nvim-treesitter's indentexpr already indents the injected language tree, so
+---callers should not reach into `nvim-treesitter.indent`.
+---@param expr string
+---@param linenr integer
+---@return integer?
+local function eval_indentexpr(expr, linenr)
+  if expr == '' or expr:find('orgmode.org.indent', 1, true) then
+    return nil
+  end
+
+  local saved_lnum = vim.v.lnum
+  vim.v.lnum = linenr
+  local ok, result = pcall(vim.api.nvim_eval, expr)
+  vim.v.lnum = saved_lnum
+  if not ok or type(result) ~= 'number' or result < 0 then
+    return nil
+  end
+  return result
+end
+
 local buf_indentexpr_cache = {}
 local function indentexpr(linenr, bufnr)
   linenr = linenr or vim.v.lnum
@@ -276,24 +301,26 @@ local function indentexpr(linenr, bufnr)
       local block_parameters = match.node:field('parameter')
 
       if block_parameters and block_parameters[1] then
-        local block_ft = vim.treesitter.get_node_text(block_parameters[1], bufnr)
+        local raw_lang = vim.treesitter.get_node_text(block_parameters[1], bufnr)
+        local lang = raw_lang and raw_lang:match('^%s*(%S+)')
+        -- Same mapping injections.scm uses, so `js` / `sh` / `emacs-lisp` resolve
+        -- to the filetype whose indentexpr (often treesitter) should run.
+        local block_ft = lang and lang ~= '' and config:detect_filetype(lang, true) or nil
 
-        if block_ft and block_ft ~= vim.bo.filetype then
-          local curr_indentexpr = vim.filetype.get_option(block_ft, 'indentexpr') --[[@as string]]
+        if block_ft and block_ft ~= vim.bo[bufnr].filetype then
+          local block_header_indent = vim.fn.indent(match.line_nr)
+          local buf_shiftwidth = vim.bo.shiftwidth
+          local sw_ok, ft_shiftwidth = pcall(vim.filetype.get_option, block_ft, 'shiftwidth')
+          if sw_ok and type(ft_shiftwidth) == 'number' then
+            vim.bo.shiftwidth = ft_shiftwidth
+          end
 
-          if curr_indentexpr and curr_indentexpr ~= '' then
-            curr_indentexpr = curr_indentexpr:gsub('%(%)$', '')
+          local expr_ok, expr = pcall(vim.filetype.get_option, block_ft, 'indentexpr')
+          local delegated = expr_ok and type(expr) == 'string' and eval_indentexpr(expr, linenr) or nil
+          vim.bo.shiftwidth = buf_shiftwidth
 
-            local buf_shiftwidth = vim.bo.shiftwidth
-            vim.bo.shiftwidth = vim.filetype.get_option(block_ft, 'shiftwidth')
-            local ok, block_ft_indent = pcall(function()
-              return vim.fn[curr_indentexpr]()
-            end)
-            if ok then
-              new_indent = math.max(block_ft_indent, vim.fn.indent(match.line_nr))
-            end
-
-            vim.bo.shiftwidth = buf_shiftwidth
+          if delegated then
+            new_indent = math.max(delegated, block_header_indent)
           end
         end
       end
