@@ -55,7 +55,8 @@ function Agenda:open_view(type, opts)
   return self:prepare_and_render()
 end
 
-function Agenda:prepare_and_render()
+---@param render? fun()
+function Agenda:prepare_and_render(render)
   return Promise.map(function(view)
     return view:prepare()
   end, self.views):next(function(views)
@@ -69,6 +70,9 @@ function Agenda:prepare_and_render()
     end
 
     self.views = views
+    if render then
+      return render()
+    end
     return self:render()
   end)
 end
@@ -319,17 +323,19 @@ function Agenda:redo(source, preserve_cursor_pos)
       return true
     end)
     :next(function()
-      local win = self:_get_window()
-      if win then
-        vim.api.nvim_win_call(win, function()
+      return self:prepare_and_render(function()
+        local win = self:_get_window()
+        if win then
+          vim.api.nvim_win_call(win, function()
+            self:render()
+          end)
+        else
           self:render()
-        end)
-      else
-        self:render()
-      end
-      if restore_view then
-        restore_view()
-      end
+        end
+        if restore_view then
+          restore_view()
+        end
+      end)
     end)
 end
 
@@ -447,7 +453,7 @@ function Agenda:goto_date()
     for _, view in ipairs(views) do
       view:goto_date(date)
     end
-    return self:render()
+    return self:prepare_and_render()
   end)
 end
 
@@ -783,7 +789,7 @@ end
 function Agenda:_call_view_and_render(method, ...)
   local executed = self:_call_view(method, ...)
   if executed then
-    return self:render()
+    return self:prepare_and_render()
   end
 end
 
