@@ -1,4 +1,5 @@
 local Promise = require('orgmode.utils.promise')
+local glob = require('orgmode.utils.glob')
 local OrgFile = require('orgmode.files.file')
 local utils = require('orgmode.utils')
 local config = require('orgmode.config')
@@ -64,19 +65,24 @@ function OrgFiles:load(force)
   end
 
   self.load_state = 'loading'
-  self.load_promise = Promise.map(function(filename, index)
-    return self:load_file(filename):next(function(orgfile)
-      if orgfile then
-        orgfile.index = index
-        self.files[orgfile.filename] = orgfile
-      end
-      return orgfile
+  self.load_promise = self
+    :_discover_files()
+    :next(function(filenames)
+      return Promise.map(function(filename, index)
+        return self:load_file(filename):next(function(orgfile)
+          if orgfile then
+            orgfile.index = index
+            self.files[orgfile.filename] = orgfile
+          end
+          return orgfile
+        end)
+      end, filenames, 50)
     end)
-  end, self:_files(true), 50):next(function()
-    self.load_state = 'loaded'
-    self.load_promise = nil
-    return self
-  end)
+    :next(function()
+      self.load_state = 'loaded'
+      self.load_promise = nil
+      return self
+    end)
 
   return self.load_promise
 end
@@ -101,19 +107,8 @@ function OrgFiles:get_tags()
   local tags = {}
   for _, orgfile in ipairs(self:all()) do
     if not orgfile:is_archive_file() then
-      local file_tags = orgfile:get_filetags()
-      if file_tags and #file_tags > 0 then
-        for _, tag in ipairs(file_tags) do
-          tags[tag] = 1
-        end
-      end
-      for _, headline in ipairs(orgfile:get_headlines()) do
-        local htags = headline:get_tags()
-        if htags and #htags > 0 then
-          for _, tag in ipairs(htags) do
-            tags[tag] = 1
-          end
-        end
+      for _, tag in ipairs(orgfile:get_tags()) do
+        tags[tag] = 1
       end
     end
   end
@@ -180,32 +175,37 @@ function OrgFiles:load_file(filename, opts)
   opts = opts or {}
   filename = vim.fn.resolve(vim.fn.fnamemodify(filename, ':p'))
 
+  ---@param file OrgFile
+  ---@return OrgPromise<nil>
   local persist_if_required = function(file)
-    ---@cast file OrgFile
     if self.files[filename] or not opts.persist then
-      return
+      return Promise.resolve()
     end
     -- Whether a file that was just created belongs to the configured paths is
     -- the one question the cache cannot answer, because the cache predates the
     -- file. Runs once per newly persisted file, not per lookup.
-    local all_paths = self:_files(true)
-    if vim.tbl_contains(all_paths, filename) then
-      self.files[filename] = file
-    end
+    return self:_discover_files():next(function(all_paths)
+      if vim.tbl_contains(all_paths, filename) then
+        self.files[filename] = file
+      end
+    end)
   end
 
   local file = self.all_files[filename]
   if file then
-    persist_if_required(file)
-    return file:reload()
+    return persist_if_required(file):next(function()
+      return file:reload()
+    end)
   end
 
   return OrgFile.load(filename):next(function(orgfile)
-    if orgfile then
-      persist_if_required(orgfile)
-      self.all_files[filename] = orgfile
+    if not orgfile then
+      return orgfile
     end
-    return orgfile
+    self.all_files[filename] = orgfile
+    return persist_if_required(orgfile):next(function()
+      return orgfile
+    end)
   end)
 end
 
@@ -371,36 +371,23 @@ function OrgFiles:_setup_paths(paths)
   return paths
 end
 
+---Find the files from the configured paths again, and cache the result
 ---@private
----@param refresh? boolean Run path discovery again instead of reusing the cached result
+---@return OrgPromise<string[]>
+function OrgFiles:_discover_files()
+  return Promise.async(function()
+    local files = vim.tbl_map(vim.fn.resolve, glob.find(self.paths, utils.is_org_file))
+    self._path_cache = files
+    return files
+  end)
+end
+
+---@private
 ---@return string[]
-function OrgFiles:_files(refresh)
-  if not refresh and self._path_cache then
-    return self._path_cache
+function OrgFiles:_files()
+  if not self._path_cache then
+    self:_discover_files():wait()
   end
-
-  local all_files = vim.tbl_map(function(file)
-    return vim.fn.glob(vim.fn.fnamemodify(file, ':p'), false, true)
-  end, self.paths)
-
-  -- Filter before resolving. A recursive path like `~/org/**/*` matches every
-  -- file in the tree, and resolving the ones that are not org files is wasted
-  -- work. The extension is taken from the globbed name, same as the filetype
-  -- detection in `orgmode/init.lua`, so a symlink is an org file when its own
-  -- name says so.
-  local org_files = vim.tbl_filter(function(file)
-    if not utils.is_org_file(file) then
-      return false
-    end
-
-    local stat = vim.uv.fs_stat(file)
-    return stat and stat.type == 'file' or false
-  end, utils.flatten(all_files))
-
-  self._path_cache = vim.tbl_map(function(file)
-    return vim.fn.resolve(file)
-  end, org_files)
-
   return self._path_cache
 end
 

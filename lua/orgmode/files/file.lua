@@ -22,6 +22,7 @@ local clean_empty_line = vim.fn.has('nvim-0.13') == 1 or vim.fn.has('nvim-0.12.3
 ---@field filename string
 ---@field lines? string[]
 ---@field buf? number
+---@field stat? uv.fs_stat.result Stat of the file, if it was already read
 
 ---@class OrgFile
 ---@field filename string
@@ -44,17 +45,14 @@ local memoize = Memoize:new(OrgFile, function(self)
   if bufnr > -1 then
     tick = vim.api.nvim_buf_get_changedtick(bufnr)
   end
-  return {
-    file = self,
-    id = table.concat({ 'file', self.root and self.root:id() or '', tick }, '_'),
-  }
+  return self, table.concat({ 'file', self.root and self.root:id() or '', tick }, '_')
 end)
 
 ---Constructor function, should not be used directly
 ---@param opts OrgFileOpts
 ---@return OrgFile
 function OrgFile:new(opts)
-  local stat = vim.uv.fs_stat(opts.filename)
+  local stat = opts.stat or vim.uv.fs_stat(opts.filename)
   local data = {
     filename = opts.filename,
     index = 0,
@@ -86,15 +84,28 @@ function OrgFile.load(filename)
     }))
   end
 
-  if not vim.uv.fs_stat(filename) or not utils.is_org_file(filename) then
+  if not utils.is_org_file(filename) then
     return Promise.resolve(false)
   end
 
-  return utils.readfile(filename, { schedule = true }):next(function(lines)
-    return OrgFile:new({
-      filename = filename,
-      lines = lines,
-    })
+  -- Stat once without blocking, the result is also used for the modified time
+  return Promise.new(function(resolve)
+    vim.uv.fs_stat(filename, function(err, stat)
+      vim.schedule(function()
+        resolve(not err and stat or false)
+      end)
+    end)
+  end):next(function(stat)
+    if not stat then
+      return false
+    end
+    return utils.readfile(filename, { schedule = true }):next(function(lines)
+      return OrgFile:new({
+        filename = filename,
+        lines = lines,
+        stat = stat,
+      })
+    end)
   end)
 end
 
@@ -205,6 +216,33 @@ function OrgFile:parse(skip_if_not_modified)
   local trees = self.parser:parse()
   self.root = trees[1]:root()
   return self.root
+end
+
+---Parse the file in small steps, without blocking the editor.
+---After this, `parse` returns the parsed tree right away.
+---@return OrgPromise<TSNode>
+function OrgFile:parse_async()
+  if self.root and not self:is_modified() then
+    return Promise.resolve(self.root)
+  end
+  -- Buffers are parsed by the highlighter already, and an async parse never
+  -- finishes if the buffer is deleted in the middle of it
+  if self:bufnr() > -1 then
+    return Promise.resolve(self:parse())
+  end
+
+  return Promise.new(function(resolve)
+    local parser = self:_get_parser()
+    parser:parse(nil, function(err, trees)
+      -- A parse that takes longer than 'redrawtime' is cancelled, finish it synchronously
+      if err or not trees then
+        return resolve(self:parse())
+      end
+      self.parser = parser
+      self.root = trees[1]:root()
+      resolve(self.root)
+    end)
+  end)
 end
 
 ---Parse the given tree-sitter query
@@ -642,6 +680,30 @@ memoize('get_filetags')
 --- @return string[]
 function OrgFile:get_filetags()
   return utils.parse_tags_string(self:_get_directive('filetags'))
+end
+
+memoize('get_tags')
+--- Get all unique tags from the file (file-level tags + headline tags)
+--- @return string[]
+function OrgFile:get_tags()
+  local tags = {}
+  local file_tags = self:get_filetags()
+  if file_tags and #file_tags > 0 then
+    for _, tag in ipairs(file_tags) do
+      tags[tag] = 1
+    end
+  end
+  for _, headline in ipairs(self:get_headlines()) do
+    local htags = headline:get_tags()
+    if htags and #htags > 0 then
+      for _, tag in ipairs(htags) do
+        tags[tag] = 1
+      end
+    end
+  end
+  local taglist = vim.tbl_keys(tags)
+  table.sort(taglist)
+  return taglist
 end
 
 memoize('get_blocks')
